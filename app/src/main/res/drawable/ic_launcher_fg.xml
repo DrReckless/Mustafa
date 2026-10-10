@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- mum çubukları -->
+    <path android:fillColor="#FFD9CBB0" android:pathData="M36,50h6v20h-6z" />
+    <path android:fillColor="#FFD9CBB0" android:pathData="M38.5,44h1v32h-1z" />
+    <path android:fillColor="#FF9A9DA1" android:pathData="M51,56h6v14h-6z" />
+    <path android:fillColor="#FF9A9DA1" android:pathData="M53.5,52h1v22h-1z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M66,40h6v24h-6z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M68.5,34h1v34h-1z" />
+    <!-- trend çizgisi -->
+    <path android:strokeColor="#FFD9CBB0" android:strokeWidth="2.5" android:strokeLineCap="round"
+        android:pathData="M32,72 L46,62 L56,66 L76,42" />
+</vector>
