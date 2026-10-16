@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d1117" />
+  <title>Demir Sınır</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="top">
+      <div id="res" class="panel"></div>
+      <div id="status" class="panel">
+        <div class="st" id="st-power" title="Enerji"><span class="ico">⚡</span><span id="power-txt">0/0</span><div class="bar"><i id="power-bar"></i></div></div>
+        <div class="st"><span class="ico">☀</span><span id="clock">06:00</span><small id="day">1. Gün</small></div>
+        <div class="st warn" id="st-wave"><span class="ico">⚔</span><span id="wave-txt">--:--</span></div>
+        <div class="speed">
+          <button data-speed="0" title="Duraklat">❚❚</button>
+          <button data-speed="1" class="on">1x</button>
+          <button data-speed="2">2x</button>
+          <button data-speed="3">3x</button>
+        </div>
+        <button id="btn-menu" class="iconbtn" title="Menü">☰</button>
+      </div>
+    </div>
+    <div id="objective" class="panel"><b>GÖREV <span id="obj-n"></span></b><span id="obj-txt"></span></div>
+    <div id="toasts"></div>
+
+    <div id="side">
+      <button id="btn-research" class="sidebtn"><span>🔬</span><small>Araştırma</small></button>
+      <button id="btn-army" class="sidebtn"><span>🎖</span><small>Ordu</small></button>
+      <button id="btn-demolish" class="sidebtn"><span>⛏</span><small>Sök</small></button>
+    </div>
+
+    <div id="buildbar" class="panel">
+      <div id="bartop">
+        <div id="cats"></div>
+        <div id="toolctl" class="hidden">
+          <div id="tool-name"></div>
+          <button id="btn-rotate" class="tbtn">⟳ Döndür</button>
+          <button id="btn-cancel" class="tbtn danger">✕ İptal</button>
+        </div>
+      </div>
+      <div id="cards"></div>
+    </div>
+
+    <div id="info" class="panel hidden"></div>
+  </div>
+
+  <div id="modal" class="hidden"><div class="mbox panel"><button class="mclose">✕</button><div class="mbody"></div></div></div>
+
+  <div id="mainmenu">
+    <div class="mm-inner">
+      <div class="logo">DEMİR <span>SINIR</span></div>
+      <div class="tag">Madencilik • Endüstri • Savunma • Fetih</div>
+      <div class="mm-btns">
+        <button id="mm-continue" class="big hidden">Devam Et</button>
+        <button id="mm-new" class="big">Yeni Oyun</button>
+        <button id="mm-help">Nasıl Oynanır</button>
+        <button id="mm-settings">Grafik Ayarları</button>
+      </div>
+      <div class="mm-foot">v1.0</div>
+    </div>
+  </div>
+
+  <div id="loading"><div class="spin"></div><div id="load-txt">Dünya oluşturuluyor…</div></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

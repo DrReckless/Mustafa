@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Demir Sınır</string>
+    <string name="title_activity_main">Demir Sınır</string>
+    <string name="package_name">com.demirsinir.oyun</string>
+    <string name="custom_url_scheme">com.demirsinir.oyun</string>
+</resources>

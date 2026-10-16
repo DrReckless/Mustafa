@@ -1,0 +1,9 @@
+{
+  "appId": "com.demirsinir.oyun",
+  "appName": "Demir Sınır",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#0b0f14",
+    "allowMixedContent": false
+  }
+}
