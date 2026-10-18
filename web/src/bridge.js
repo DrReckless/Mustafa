@@ -51,7 +51,24 @@ export const storage = {
 // base64 (data URL olmadan) veriyi paylaş / kaydet
 export function shareFile(base64, filename, mime, title = 'Paylaş') {
   if (N) { N.shareFile(base64, filename, mime, title); return; }
+  // Telefon tarayıcısında sistem paylaşım menüsü (WhatsApp, e-posta…)
+  try {
+    const file = new File([base64ToBytes(base64)], filename, { type: mime });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file], title }).catch((e) => {
+        if (e && e.name !== 'AbortError') downloadBase64(base64, filename, mime);
+      });
+      return;
+    }
+  } catch {}
   downloadBase64(base64, filename, mime);
+}
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 export function saveFile(base64, filename, mime) {
@@ -61,13 +78,18 @@ export function saveFile(base64, filename, mime) {
 }
 
 function downloadBase64(base64, filename, mime) {
+  const url = URL.createObjectURL(new Blob([base64ToBytes(base64)], { type: mime }));
   const a = document.createElement('a');
-  a.href = `data:${mime};base64,${base64}`;
+  a.href = url;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
+
+// Tarayıcının projeleri kendiliğinden silmemesini iste
+if (!N) try { navigator.storage?.persist?.(); } catch {}
 
 export function toast(msg) {
   if (N && N.toast) { N.toast(msg); return; }

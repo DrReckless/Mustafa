@@ -824,6 +824,18 @@ window.onAndroidBack = () => {
   return false;
 };
 
+// Web tarayıcısında geri tuşu: önce uygulama içinde geri git
+if (!isAndroid) {
+  try {
+    history.replaceState({ root: true }, '');
+    history.pushState({ app: true }, '');
+    window.addEventListener('popstate', () => {
+      if (window.onAndroidBack()) history.pushState({ app: true }, '');
+      else history.back();
+    });
+  } catch {}
+}
+
 window.addEventListener('pagehide', saveNow);
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
 window.addEventListener('keydown', (e) => {

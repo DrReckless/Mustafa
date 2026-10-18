@@ -1,0 +1,12 @@
+{
+  "name": "Hantürk Plan 3D",
+  "short_name": "Hantürk 3D",
+  "description": "Kat planı, otomatik mobilya yerleşimi ve 3B müşteri sunumu",
+  "lang": "tr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "icons": [{ "src": "img/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }]
+}

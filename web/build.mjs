@@ -21,7 +21,7 @@ const ctx = await esbuild.context({
   outdir: out,
   minify: !watch,
   sourcemap: watch ? 'inline' : false,
-  target: ['chrome100'],
+  target: ['chrome100', 'safari15', 'firefox100'],
   chunkNames: 'chunks/[name]-[hash]',
   legalComments: 'none',
   logLevel: 'info',
