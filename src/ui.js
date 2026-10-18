@@ -1,4 +1,5 @@
-import { ITEMS, ITEM_KEYS, BUILDINGS, RECIPES, UNITS, TECH, CATEGORIES, PURITY } from './config.js';
+import { ITEMS, ITEM_KEYS, BUILDINGS, RECIPES, UNITS, TECH, CATEGORIES, PURITY, MAP_TYPES } from './config.js';
+import { RECIPES_OF } from './sim/game.js';
 import { fmt } from './util.js';
 
 const $ = (s) => document.querySelector(s);
@@ -8,7 +9,7 @@ export class UI {
   constructor(app) {
     this.app = app;
     this.thumbs = app.thumbs;
-    this.cat = 'uretim';
+    this.cat = 'maden';
     this.lastStock = {};
     this.infoT = 0;
     this.bindStatic();
@@ -27,6 +28,7 @@ export class UI {
       this.app.setSpeed(+b.dataset.speed); this.app.audio.play('click');
     }));
     $('#btn-menu').addEventListener('click', () => this.showMenu());
+    $('#st-power').addEventListener('click', () => this.showPower());
     $('#btn-research').addEventListener('click', () => this.showResearch());
     $('#btn-army').addEventListener('click', () => this.showArmy());
     $('#btn-demolish').addEventListener('click', () => {
@@ -120,11 +122,12 @@ export class UI {
     const g = this.game;
     this.renderRes();
     const p = g.power;
-    $('#power-txt').textContent = `${Math.round(p.demand)}/${Math.round(p.supply)} kW`;
+    const pt = `${Math.round(p.demand)}/${Math.round(p.supply)} kW` + (p.storeCap > 0 ? ` 🔋${Math.round(p.store / p.storeCap * 100)}%` : '') + (p.unpowered ? ` ⚠${p.unpowered}` : '');
+    const ptEl = $('#power-txt'); if (ptEl.textContent !== pt) ptEl.textContent = pt;
     const bar = $('#power-bar');
     bar.style.width = `${Math.min(100, p.supply > 0 ? (p.demand / Math.max(1, p.cap || p.supply)) * 100 : 0)}%`;
-    bar.style.background = p.ratio < 1 ? 'var(--bad)' : p.demand > p.supply * 0.85 ? 'var(--acc)' : 'var(--good)';
-    $('#st-power').style.color = p.ratio < 1 ? 'var(--bad)' : '';
+    bar.style.background = p.worst < 1 ? 'var(--bad)' : p.demand > p.supply * 0.85 ? 'var(--acc)' : 'var(--good)';
+    $('#st-power').style.color = p.worst < 1 || p.unpowered ? 'var(--bad)' : '';
     $('#clock').textContent = g.clock();
     $('#day').textContent = `${g.day()}. Gün`;
     const w = g.wave.next;
@@ -179,10 +182,10 @@ export class UI {
     box.appendChild(el('div', 'hpbar', '<i id="i-hp"></i>'));
     box.appendChild(el('div', 'desc', own ? d.desc : 'Düşman yapısı. Ordunu bu üsse saldırmaya gönder.'));
     const dyn = el('div', ''); dyn.id = 'i-dyn'; box.appendChild(dyn);
-    if (own && ['smelter', 'assembler', 'foundry'].includes(b.type)) {
+    if (own && d.machine) {
       const rec = el('div', 'recipes');
-      for (const [rk, r] of Object.entries(RECIPES)) {
-        if (r.building !== b.type) continue;
+      for (const rk of RECIPES_OF[b.type]) {
+        const r = RECIPES[rk];
         const btn = el('button', 'recipe' + (b.recipe === rk ? ' on' : ''));
         const io = Object.entries(r.inp).map(([k, v]) => `${v}${this.icon(k)}`).join('+') + ' → ' + Object.entries(r.out).map(([k, v]) => `${v}${this.icon(k)}`).join('');
         btn.innerHTML = `<b>${r.name}</b><div class="io">${io}</div>`;
@@ -222,10 +225,15 @@ export class UI {
     }
     if (own && b.type !== 'hq') {
       const r = el('div', 'btnrow');
-      if (d.size === 1) {
+      if (d.mine || d.machine || d.speed || d.range || b.type === 'factory' || b.type === 'splitter') {
         const rot = el('button', 'btn', '⟳ Döndür');
         rot.addEventListener('click', () => { g.rotate(b); this.app.audio.play('click'); });
         r.appendChild(rot);
+      }
+      if (d.power || d.gen || d.store) {
+        const tg = el('button', 'btn', b.off ? '▶ Aç' : '⏸ Kapat');
+        tg.addEventListener('click', () => { g.toggle(b); this.app.audio.play('click'); tg.textContent = b.off ? '▶ Aç' : '⏸ Kapat'; this.refreshInfo(); });
+        r.appendChild(tg);
       }
       const dem = el('button', 'btn red', '⛏ Sök (%60 iade)');
       dem.addEventListener('click', () => { g.demolish(b); this.app.audio.play('demolish'); this.app.select(null); });
@@ -273,55 +281,78 @@ export class UI {
     }
     const b = t, d = BUILDINGS[b.type];
     const st = (s, c) => `<div class="row"><span>Durum</span><b class="${c}">${s}</b></div>`;
-    const pr = g.power.ratio;
+    const pr = g.pr(t);
     if (b.faction !== 0) { dyn.innerHTML = h; return; }
-    switch (b.type) {
-      case 'miner': {
-        const rate = 60 / 2.2 * PURITY[b.purity].mul;
-        h += `<div class="row"><span>Yatak</span><b>${this.icon(b.ore)} ${ITEMS[b.ore].name} (${PURITY[b.purity].name})</b></div>`;
-        h += `<div class="row"><span>Hız</span><b>${rate.toFixed(0)} / dk</b></div>`;
-        h += b.outBuf.length >= 2 ? st('Çıkış tıkalı – önüne konveyör bağla', 'no') : pr < 1 ? st('Düşük enerji', 'no') : st('Çalışıyor', 'ok');
-        h += `<div class="pbar"><i style="width:${b.progress * 100}%"></i></div>`;
-        break;
-      }
-      case 'smelter': case 'assembler': case 'foundry': {
-        const r = RECIPES[b.recipe];
-        if (!r) { h += st('Cevher bekleniyor (otomatik tarif)', ''); break; }
-        h += `<div class="row"><span>Girdi</span><span class="buf">${Object.keys(r.inp).map((k) => `<span>${this.icon(k)}${b.inBuf[k] || 0}</span>`).join('')}</span></div>`;
+    const net = g.pnet.nets[b.net];
+    if (d.power && !d.node) {
+      h += b.net < 0 ? `<div class="row"><span>Elektrik</span><b class="no">Bağlantı yok – yakına Elektrik Direği kur</b></div>`
+        : `<div class="row"><span>Elektrik</span><b class="${net.ratio < 1 ? 'no' : 'ok'}">${d.power} kW • şebeke %${Math.round(net.ratio * 100)}</b></div>`;
+    }
+    if (b.off) h += st('Kapalı', '');
+    else if (d.mine) {
+      const rate = 60 / 2.2 * PURITY[b.purity].mul * d.speed;
+      h += `<div class="row"><span>Yatak</span><b>${this.icon(b.ore)} ${ITEMS[b.ore].name} (${PURITY[b.purity].name})</b></div>`;
+      h += `<div class="row"><span>Hız</span><b>${rate.toFixed(0)} / dk</b></div>`;
+      h += b.outBuf.length >= 2 ? st('Çıkış tıkalı – önüne konveyör bağla', 'no') : b.net < 0 ? st('Elektrik yok', 'no') : pr < 1 ? st('Düşük enerji', 'no') : st('Çalışıyor', 'ok');
+      h += `<div class="pbar"><i style="width:${b.progress * 100}%"></i></div>`;
+    } else if (d.machine) {
+      const r = RECIPES[b.recipe];
+      if (!r) h += st('Malzeme bekleniyor (tarif kendiliğinden seçilir)', '');
+      else {
+        h += `<div class="row"><span>Girdi</span><span class="buf">${Object.keys(r.inp).map((k) => `<span>${this.icon(k)}${b.inBuf[k] || 0}/${r.inp[k]}</span>`).join('')}</span></div>`;
         h += `<div class="row"><span>Çıktı</span><span class="buf">${Object.keys(r.out).map((k) => `<span>${this.icon(k)}${b.outBuf.filter((x) => x === k).length}</span>`).join('')}</span></div>`;
-        h += `<div class="row"><span>Hız</span><b>${(60 / r.time * Object.values(r.out)[0]).toFixed(0)} / dk</b></div>`;
+        h += `<div class="row"><span>Hız</span><b>${Object.entries(r.out).map(([k, n]) => `${(60 / r.time * n).toFixed(0)} ${ITEMS[k].name}`).join(' + ')} / dk</b></div>`;
         if (b.outBuf.length >= 6) h += st('Çıkış tıkalı – önüne konveyör bağla', 'no');
-        else if (b.working) h += pr < 1 ? st('Düşük enerji', 'no') : st('Üretiyor', 'ok');
+        else if (b.working) h += b.net < 0 ? st('Elektrik yok', 'no') : pr < 1 ? st('Düşük enerji', 'no') : st('Üretiyor', 'ok');
         else h += st('Girdi bekleniyor', '');
         h += `<div class="pbar"><i style="width:${b.progress * 100}%"></i></div>`;
-        break;
       }
-      case 'generator':
-        h += `<div class="row"><span>Yakıt</span><b>${this.icon('coal')} ${b.fuel}</b></div>`;
-        h += b.working ? st('Yakıyor (+80 kW)', 'ok') : b.fuel > 0 ? st('Beklemede (ihtiyaç yok)', '') : st('Kömür gerekli', 'no');
-        break;
-      case 'solar':
-        h += st(g.sunLevel() > 0.05 ? `Üretiyor (${Math.round(25 * Math.min(1, g.sunLevel() * 1.4))} kW)` : 'Gece – üretim yok', g.sunLevel() > 0.05 ? 'ok' : '');
-        break;
-      case 'turret_mg': case 'turret_cannon': case 'turret_laser':
-        h += `<div class="row"><span>Hasar / Menzil</span><b>${d.dmg} / ${d.range}</b></div>`;
-        if (d.ammo) h += `<div class="row"><span>Mühimmat (depo)</span><b class="${g.stock.ammo < 30 ? 'no' : ''}">${this.icon('ammo')} ${Math.floor(g.stock.ammo)}</b></div>`;
-        else h += `<div class="row"><span>Enerji</span><b>${d.power} kW</b></div>`;
-        h += b.noAmmo ? st('Mühimmat yok!', 'no') : b.target ? st('Ateş ediyor', 'no') : st('Nöbette', 'ok');
-        break;
-      case 'factory':
-        h += `<div class="row"><span>Kuyruk</span><span class="buf">${b.queue.map((k) => `<span><img src="${this.thumbs.u[k]}"></span>`).join('') || '—'}</span></div>`;
-        h += `<div class="pbar"><i style="width:${b.progress * 100}%"></i></div>`;
-        break;
-      case 'hq': {
-        const n = g.units.filter((u) => u.faction === 0).length;
-        h += `<div class="row"><span>Ordu</span><b>${n} birim</b></div>`;
-        h += `<div class="row"><span>Taban enerji</span><b>30 kW</b></div>`;
-        break;
+    } else if (d.fuel) {
+      h += `<div class="row"><span>Yakıt</span><b>${this.icon(d.fuel)} ${b.fuel}${b.burn > 0 ? ` • ${Math.ceil(b.burn)} sn` : ''}</b></div>`;
+      h += b.working ? st(`Çalışıyor (+${d.gen} kW)`, 'ok') : b.fuel > 0 ? st('Beklemede (ihtiyaç yok)', '') : st(`${ITEMS[d.fuel].name} gerekli`, 'no');
+    } else if (d.store) {
+      h += `<div class="row"><span>Dolum</span><b>${Math.round(b.charge)} / ${d.store} kJ (%${Math.round(b.charge / d.store * 100)})</b></div>`;
+      h += `<div class="pbar"><i style="width:${b.charge / d.store * 100}%;background:var(--good)"></i></div>`;
+      h += b.working ? st(`Enerji veriyor (en çok ${d.rate} kW)`, 'ok') : b.charge >= d.store ? st('Dolu', 'ok') : st('Şarj oluyor / beklemede', '');
+    } else {
+      switch (b.type) {
+        case 'solar':
+          h += st(b.out > 0.5 ? `Üretiyor (${Math.round(b.out)} kW)` : 'Gece – üretim yok', b.out > 0.5 ? 'ok' : '');
+          break;
+        case 'wind':
+          h += `<div class="row"><span>Rüzgar</span><b>%${Math.round(g.wind * 100)}</b></div>`;
+          h += st(`Üretiyor (${Math.round(b.out || 0)} kW)`, 'ok');
+          break;
+        case 'pole': case 'pole_big':
+          h += `<div class="row"><span>Kapsama / bağlantı</span><b>${d.node.cover} / ${d.node.link} karo</b></div>`;
+          if (net) h += `<div class="row"><span>Şebeke</span><b class="${net.ratio < 1 ? 'no' : 'ok'}">${Math.round(net.demand)}/${Math.round(net.supply)} kW • ${net.nodes.length} düğüm • ${net.consumers.length} makine</b></div>`;
+          if (net && !net.hasHq && !net.nodes.some((n) => BUILDINGS[n.type].gen)) h += st('Üretim kaynağına bağlı değil', 'no');
+          break;
+        case 'lamp':
+          h += st(b.working ? 'Aydınlatıyor' : 'Gündüz – kapalı', b.working ? 'ok' : '');
+          break;
+        case 'factory':
+          h += `<div class="row"><span>Kuyruk</span><span class="buf">${b.queue.map((k) => `<span><img src="${this.thumbs.u[k]}"></span>`).join('') || '—'}</span></div>`;
+          h += `<div class="pbar"><i style="width:${b.progress * 100}%"></i></div>`;
+          break;
+        case 'hq': {
+          const n = g.units.filter((u) => u.faction === 0).length;
+          h += `<div class="row"><span>Ordu</span><b>${n} birim</b></div>`;
+          h += `<div class="row"><span>Temel enerji</span><b>30 kW</b></div>`;
+          if (net) h += `<div class="row"><span>Ana şebeke</span><b class="${net.ratio < 1 ? 'no' : 'ok'}">${Math.round(net.demand)}/${Math.round(net.supply)} kW</b></div>`;
+          break;
+        }
+        case 'splitter':
+          break;
+        default:
+          if (b.items) h += `<div class="row"><span>Taşınan</span><span class="buf">${b.items.map((i) => `<span>${this.icon(i.t)}</span>`).join('') || '—'}</span></div><div class="row"><span>Hız</span><b>${Math.round(1.8 * d.speed / 0.34 * 60)} / dk</b></div>`;
       }
-      case 'belt':
-        h += `<div class="row"><span>Taşınan</span><span class="buf">${b.items.map((i) => `<span>${this.icon(i.t)}</span>`).join('') || '—'}</span></div>`;
-        break;
+      if (d.range) {
+        const item = d.ammoItem || 'ammo';
+        h += `<div class="row"><span>Hasar / Menzil</span><b>${d.dmg} / ${g.turretRange(b, g.isNight()).toFixed(1)}${b.lit ? ' 💡' : ''}</b></div>`;
+        if (d.ammo) h += `<div class="row"><span>${ITEMS[item].name} (depo)</span><b class="${g.stock[item] < 10 ? 'no' : ''}">${this.icon(item)} ${Math.floor(g.stock[item])}</b></div>`;
+        h += b.noAmmo ? st(`${ITEMS[item].name} yok!`, 'no') : b.target ? st('Ateş ediyor', 'no') : st('Nöbette', 'ok');
+      }
     }
     if (dyn._h !== h) { dyn.innerHTML = h; dyn._h = h; }
   }
@@ -345,13 +376,14 @@ export class UI {
     const box = body.querySelector('.tech');
     for (const t of TECH) {
       const done = g.researched.has(t.id);
-      const lock = t.req && !g.researched.has(t.req);
+      const lock = !g.techAvailable(t);
       const c = el('div', 'tcard' + (done ? ' done' : lock ? ' lock' : ''));
-      const ul = [...t.unlocks.map((k) => this.thumbs.b[k]), ...(t.units || []).map((k) => this.thumbs.u[k])].map((s) => `<img src="${s}">`).join('');
+      const ul = [...t.unlocks.map((k) => [this.thumbs.b[k], BUILDINGS[k].name]), ...(t.units || []).map((k) => [this.thumbs.u[k], UNITS[k].name])].map(([s, n]) => `<img src="${s}" title="${n}">`).join('');
       c.innerHTML = `<h4>${t.name}</h4><div class="ul">${ul}</div><div style="font-size:12px;color:var(--dim)">${t.desc}</div>` +
         (done ? '<div class="ok" style="margin-top:6px;font-weight:700">✓ Tamamlandı</div>' : `<div class="cost">${this.costHtml(t.cost)}</div>`);
       if (!done) {
-        const b = el('button', 'btn acc', lock ? `Önce: ${TECH.find((q) => q.id === t.req).name}` : 'Araştır');
+        const miss = g.techReqs(t).filter((r) => !g.researched.has(r)).map((r) => TECH.find((q) => q.id === r).name).join(', ');
+        const b = el('button', 'btn acc', lock ? `Önce: ${miss}` : 'Araştır');
         b.disabled = lock || !g.canAfford(t.cost);
         b.addEventListener('click', () => {
           if (g.research(t.id)) { this.app.audio.play('research'); this.showResearch(); this.renderCards(); }
@@ -411,30 +443,81 @@ export class UI {
       <div class="btnrow"><button class="btn" id="m-help">❓ Nasıl Oynanır</button><button class="btn red" id="m-new">⟲ Yeni Oyun</button></div>
       <p style="margin-top:14px"><b>Grafik Kalitesi</b> <small style="color:var(--dim)">(değişiklik oyunu yeniden yükler, ilerleme kaydedilir)</small></p>
       <div class="opts" id="m-q">${['low', 'medium', 'high'].map((k) => `<button data-q="${k}" class="${q === k ? 'on' : ''}">${{ low: 'Düşük', medium: 'Orta', high: 'Yüksek' }[k]}</button>`).join('')}</div>
+      <p><b>Gece Aydınlığı</b></p>
+      <div class="opts" id="m-night">${this.nightOpts()}</div>
       <p><b>Ses</b></p>
       <div class="opts" id="m-snd"><button data-s="1" class="${this.app.audio.enabled ? 'on' : ''}">Açık</button><button data-s="0" class="${!this.app.audio.enabled ? 'on' : ''}">Kapalı</button></div>`);
     body.querySelector('#m-resume').addEventListener('click', () => this.closeModal());
     body.querySelector('#m-save').addEventListener('click', () => { this.app.save(); this.toast('Oyun kaydedildi', 'good'); });
     body.querySelector('#m-help').addEventListener('click', () => this.showHelp());
     body.querySelector('#m-new').addEventListener('click', () => {
-      if (confirm('Mevcut oyun silinecek. Emin misin?')) this.app.newGame();
+      this.showNewGame(true);
     });
     body.querySelectorAll('#m-q button').forEach((b) => b.addEventListener('click', () => this.app.setQuality(b.dataset.q)));
+    this.bindNightOpts(body);
     body.querySelectorAll('#m-snd button').forEach((b) => b.addEventListener('click', () => {
       this.app.audio.setEnabled(b.dataset.s === '1'); localStorage.setItem('ds_sound', b.dataset.s);
       body.querySelectorAll('#m-snd button').forEach((x) => x.classList.toggle('on', x === b));
     }));
   }
+  nightOpts() {
+    const m = this.app.view.nightMode;
+    return ['Karanlık', 'Normal', 'Aydınlık'].map((n, i) => `<button data-n="${i}" class="${m === i ? 'on' : ''}">${n}</button>`).join('');
+  }
+  bindNightOpts(body) {
+    body.querySelectorAll('[data-n]').forEach((b) => b.addEventListener('click', () => {
+      this.app.setNight(+b.dataset.n);
+      body.querySelectorAll('[data-n]').forEach((x) => x.classList.toggle('on', x === b));
+    }));
+  }
+  showNewGame(confirmLoss) {
+    this.modalKind = 'newgame';
+    const body = this.openModal(`<h2>🗺 Yeni Oyun – Harita Seç</h2>
+      ${confirmLoss ? '<p class="no">Mevcut oyunun silinecek.</p>' : ''}
+      <div class="maps">${MAP_TYPES.map((m) => `<button class="mapc" data-m="${m.id}"><b>${m.name}</b><small>${m.desc}</small></button>`).join('')}</div>`);
+    body.querySelectorAll('[data-m]').forEach((b) => b.addEventListener('click', () => this.app.newGame(b.dataset.m)));
+  }
+  showPower() {
+    this.modalKind = 'power';
+    const g = this.game;
+    if (g.gridDirty) g.rebuildGrid();
+    const p = g.power;
+    const nets = g.pnet.nets.filter((n) => n.consumers.length || n.nodes.length > 1 || n.hasHq);
+    const src = {};
+    for (const n of g.pnet.nets) for (const b of n.nodes) {
+      const d = BUILDINGS[b.type];
+      if (!d.gen) continue;
+      const out = b.off ? 0 : b.type === 'hq' ? d.gen : (b.type === 'solar' || b.type === 'wind') ? (b.out || 0) : b.working ? d.gen : 0;
+      const e = (src[b.type] ||= { n: 0, out: 0, cap: 0 });
+      e.n++; e.out += out; e.cap += d.gen;
+    }
+    const use = {};
+    for (const n of g.pnet.nets) for (const b of n.consumers) {
+      const e = (use[b.type] ||= { n: 0, kw: 0 });
+      e.n++; if (b.working && !b.off) e.kw += BUILDINGS[b.type].power;
+    }
+    const row = (k, a, b) => `<div class="prow"><img src="${this.thumbs.b[k]}"><span>${BUILDINGS[k].name}</span><b>${a}</b><small>${b}</small></div>`;
+    this.openModal(`<h2>⚡ Enerji Şebekesi</h2>
+      <p>Toplam: <b>${Math.round(p.demand)} kW</b> tüketim / <b>${Math.round(p.supply)} kW</b> üretim${p.storeCap ? ` • Akü: <b>${Math.round(p.store / 1000)}/${Math.round(p.storeCap / 1000)} MJ</b>` : ''} • Rüzgar: %${Math.round(g.wind * 100)}</p>
+      ${p.unpowered ? `<p class="no">⚠ ${p.unpowered} yapı hiçbir şebekeye bağlı değil. Yanlarına <b>Elektrik Direği</b> kur (yapıya dokununca kapsama halkaları görünür).</p>` : ''}
+      <div class="pcols"><div><h4>Üretim</h4>${Object.entries(src).map(([k, e]) => row(k, `${Math.round(e.out)} kW`, `${e.n} adet • en çok ${e.cap} kW`)).join('') || '<small>—</small>'}</div>
+      <div><h4>Tüketim</h4>${Object.entries(use).sort((a, b) => b[1].kw - a[1].kw).map(([k, e]) => row(k, `${Math.round(e.kw)} kW`, `${e.n} adet`)).join('') || '<small>—</small>'}</div></div>
+      <h4>Şebekeler (${nets.length})</h4>
+      ${nets.map((n, i) => `<div class="prow"><span>${n.hasHq ? 'Ana şebeke' : `Şebeke ${i + 1}`}</span><b class="${n.ratio < 1 ? 'no' : 'ok'}">%${Math.round(n.ratio * 100)}</b><small>${Math.round(n.demand)}/${Math.round(n.supply)} kW • ${n.nodes.length} düğüm • ${n.consumers.length} makine</small></div>`).join('')}
+      <p style="font-size:12px;color:var(--dim)">İpucu: Enerji yetmezse o şebekedeki makineler yavaşlar. Gereksiz makineleri bilgi panelinden <b>Kapat</b>, geceler için <b>Akü Deposu</b> ya da <b>Rüzgar Türbini</b> kur.</p>`);
+  }
   showHelp() {
     this.modalKind = 'help';
     this.openModal(`<h2>❓ Nasıl Oynanır</h2>
-      <p><b>Amaç:</b> Üssünü kur, sanayini büyüt, gece gelen saldırılara dayan ve iki rakip üssü (Kızıl Lejyon, Pas Klanı) yok et.</p>
-      <p><b>1. Madencilik:</b> Cevher yataklarının (demir: pas rengi, bakır: yeşil, kömür: siyah, taş: gri, kuvars: kristal) üzerine <b>Maden Matkabı</b> kur. Matkap cevheri <b>ok yönünde</b> önüne bırakır.</p>
-      <p><b>2. Taşıma:</b> <b>Konveyör</b> seçip parmağını sürükleyerek hat çiz. Hat, çizdiğin yönde akar. Ana Üs'e giren her şey depoya eklenir.</p>
-      <p><b>3. İşleme:</b> Cevheri <b>Eritme Fırını</b>'na sok (tarif kendiliğinden seçilir), çıkanı konveyörle üsse taşı. <b>Montaj Makinesi</b> ve <b>Dökümhane</b>'de tarifi bilgi panelinden seç. Birden fazla girdi için konveyörleri yan taraflardan bağla.</p>
-      <p><b>4. Enerji:</b> Ana Üs 30 kW verir. Fazlası için <b>Kömür Jeneratörü</b>'ne kömür taşı ya da <b>Güneş Paneli</b> kur. Enerji yetmezse makineler yavaşlar.</p>
-      <p><b>5. Savunma:</b> Her gece rakipler saldırır. <b>Taret</b> ve <b>Beton Duvar</b> kur. Makineli ve obüs taretleri depodan <b>mühimmat</b> harcar – mühimmat üretimini ihmal etme!</p>
-      <p><b>6. Araştırma ve Ordu:</b> Malzeme biriktirip araştırma yap. <b>Araç Fabrikası</b>'nda robot, tank ve dron üret; Ordu menüsünden rakip üslere saldır. Karargâhlarını yıkınca ganimet kazanırsın.</p>
+      <p><b>Amaç:</b> Üssünü kur, sanayini büyüt, saldırılara dayan ve üç rakip üssü (Kızıl Lejyon, Pas Klanı, Kara Sancak) yok et.</p>
+      <p><b>1. Madencilik:</b> Cevher yataklarının üzerine <b>Maden Matkabı</b> kur (demir: pas rengi, bakır: yeşil, kömür: siyah, taş: gri, kuvars: kristal, boksit: kızıl, kükürt: sarı, uranyum: parlayan yeşil). Petrol sızıntılarına (siyah gölcük) <b>Petrol Pompası</b> gerekir. Matkap çıkardığını <b>ok yönüne</b> bırakır.</p>
+      <p><b>2. Taşıma:</b> <b>Konveyör</b> seçip parmağını sürükleyerek hat çiz. Hat, çizdiğin yönde akar. Ana Üs'e giren her şey depoya eklenir. Hızlı konveyörü eski hattın üstüne çizersen yükseltir.</p>
+      <p><b>3. Eritme:</b> Her kaynağın kendi fırını var: <b>Demir Fırını</b>, <b>Bakır İzabe Fırını</b>, <b>Taş Fırını</b> (beton/cam), <b>Ark Fırını</b> (silikon), <b>Alüminyum Tesisi</b>, <b>Dökümhane</b> (çelik/alaşım). Fırınlara kömür de verirsen kok tarifleriyle daha verimli üretirsin.</p>
+      <p><b>4. Montaj:</b> <b>Montaj Makinesi</b>, <b>İleri Montaj Hattı</b>, <b>Kimya Tesisi</b>, <b>Rafineri</b> ve <b>Zenginleştirme</b> tesislerinde tarifi bilgi panelinden seç. Birden fazla girdi için konveyörleri farklı yanlardan bağla.</p>
+      <p><b>5. Enerji:</b> Makineler ancak bir şebekeye bağlıysa çalışır. Ana Üs 10 karo çevresine 30 kW verir. Uzaklara <b>Elektrik Direği</b> ile ulaş. Kömür/yakıt jeneratörü, güneş, rüzgar, akü ve nükleer reaktör kur. ⚡ göstergesine dokunarak şebeke raporunu aç.</p>
+      <p><b>6. Savunma:</b> Rakipler düzenli saldırır. <b>Taret</b> ve <b>Duvar</b> kur. Makineli ve obüs taretleri depodan <b>mühimmat</b>, füze bataryası <b>füze</b> harcar. Gece <b>Projektör</b> ışığındaki taretler daha uzağa ateş eder.</p>
+      <p><b>7. Araştırma ve Ordu:</b> Malzeme biriktirip araştırma yap. <b>Araç Fabrikası</b>'nda robot, tank ve dron üret; Ordu menüsünden üç rakip üsse saldır. Karargâhlarını yıkınca ganimet kazanırsın.</p>
+      <p><b>Gece çok karanlıksa:</b> Menü → <b>Gece Aydınlığı</b> → Aydınlık seç ve üssüne projektör kur.</p>
       <p><b>Kontroller:</b> Tek parmak: kaydır • İki parmak: yakınlaştır/döndür • Bir yapıya dokun: bilgi paneli • ⟳ ile yerleştirme yönünü çevir.</p>`);
   }
   showEnd(won) {
@@ -444,7 +527,7 @@ export class UI {
       <p style="text-align:center">${won ? 'Tüm rakip üsleri yok ettin. Bölge artık senin!' : 'Ana Üs yok edildi.'}</p>
       <div class="stats"><div><b>${g.day()}</b>Gün</div><div><b>${g.wave.n}</b>Dalga</div><div><b>${g.stats.kills}</b>Düşman</div><div><b>${g.buildings.size}</b>Yapı</div></div>
       <div class="btnrow">${won ? '<button class="btn" id="e-cont">Oynamaya Devam</button>' : ''}<button class="btn acc" id="e-new">Yeni Oyun</button></div></div>`);
-    body.querySelector('#e-new').addEventListener('click', () => this.app.newGame());
+    body.querySelector('#e-new').addEventListener('click', () => this.showNewGame(false));
     body.querySelector('#e-cont')?.addEventListener('click', () => { g.state = 'play'; this.closeModal(); });
   }
 }

@@ -6,7 +6,7 @@ import { Input } from './input.js';
 import { Audio } from './audio.js';
 import { PLAYER_HQ, TILE } from './config.js';
 
-const SAVE_KEY = 'ds_save_v1';
+const SAVE_KEY = 'ds_save_v2';
 const $ = (s) => document.querySelector(s);
 
 function detectQuality() {
@@ -50,8 +50,8 @@ class App {
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.playing) this.save(); });
     window.addEventListener('pagehide', () => { if (this.playing) this.save(); });
   }
-  freshGame() {
-    const g = new Game();
+  freshGame(preset = 'mixed') {
+    const g = new Game({ preset });
     g.setupNew();
     return g;
   }
@@ -72,15 +72,17 @@ class App {
   bindMenu() {
     $('#mm-new').addEventListener('click', () => {
       this.audio.init();
-      if (localStorage.getItem(SAVE_KEY) && !confirm('Kayıtlı oyunun silinecek. Yeni oyuna başlansın mı?')) return;
-      this.newGame();
+      this.ui.showNewGame(!!localStorage.getItem(SAVE_KEY));
     });
     $('#mm-continue').addEventListener('click', () => { this.audio.init(); this.play(); });
     $('#mm-help').addEventListener('click', () => this.ui.showHelp());
     $('#mm-settings').addEventListener('click', () => {
       const body = this.ui.openModal(`<h2>Grafik Ayarları</h2><p>Düşük ayar eski telefonlarda daha akıcı çalışır. Yüksek ayar gölgeler, ışıma (bloom) ve yoğun çim içerir.</p>
-        <div class="opts">${['low', 'medium', 'high'].map((k) => `<button data-q="${k}" class="${this.quality === k ? 'on' : ''}">${{ low: 'Düşük', medium: 'Orta', high: 'Yüksek' }[k]}</button>`).join('')}</div>`);
+        <div class="opts">${['low', 'medium', 'high'].map((k) => `<button data-q="${k}" class="${this.quality === k ? 'on' : ''}">${{ low: 'Düşük', medium: 'Orta', high: 'Yüksek' }[k]}</button>`).join('')}</div>
+        <p><b>Gece Aydınlığı</b> – gece ekranı karanlık buluyorsan “Aydınlık” seç.</p>
+        <div class="opts">${this.ui.nightOpts()}</div>`);
       body.querySelectorAll('button[data-q]').forEach((b) => b.addEventListener('click', () => this.setQuality(b.dataset.q)));
+      this.ui.bindNightOpts(body);
     });
   }
   play() {
@@ -95,12 +97,12 @@ class App {
       setTimeout(() => this.ui.toast('Hoş geldin Komutan! Sol üstteki görevleri takip et.', 'info'), 600);
     }
   }
-  newGame() {
+  newGame(preset = 'mixed') {
     localStorage.removeItem(SAVE_KEY);
     this.ui.closeModal();
     this.select(null);
     this.input.setTool(null);
-    this.startGame(this.freshGame());
+    this.startGame(this.freshGame(preset));
     this.play();
     this.save();
   }
@@ -115,6 +117,10 @@ class App {
     if (this.playing) this.save();
     localStorage.setItem('ds_quality', q);
     location.reload();
+  }
+  setNight(m) {
+    this.view.setNightMode(m);
+    localStorage.setItem('ds_night', String(m));
   }
   setSpeed(s, temp = false) {
     this.game.speed = s;

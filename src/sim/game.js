@@ -2,7 +2,7 @@ import {
   MAP_W, MAP_H, DX, DY, ITEMS, RECIPES, BUILDINGS, UNITS, TECH, START_UNLOCKED, START_STOCK,
   RIVALS, PLAYER_HQ, DAY_LENGTH, PURITY,
 } from '../config.js';
-import { World, ORE_TYPES } from './world.js';
+import { World, ORE_TYPES, isBlocked } from './world.js';
 import { MinHeap, mulberry32 } from '../util.js';
 
 const BELT_SPEED = 1.8;     // karo/sn
@@ -10,13 +10,20 @@ const BELT_GAP = 0.34;
 const MINER_TIME = 2.2;
 const MAX_UNITS = 40;
 const HQ_GUN = { range: 7, dmg: 7, rate: 0.3 };
+const LAMP_R = 7;
+const FUEL_CAP = { coal: 8, fuel: 6, fuel_rod: 3 };
+
+// tarif listeleri: bina -> [tarif anahtarları]
+export const RECIPES_OF = {};
+for (const [k, r] of Object.entries(RECIPES)) (RECIPES_OF[r.building] ||= []).push(k);
 
 const OBJECTIVES = [
   { id: 'miner', text: 'Demir cevheri yatağına bir Maden Matkabı kur', reward: { iron_ingot: 20 } },
-  { id: 'smelt', text: 'Matkabın önünden Eritme Fırınına konveyör çek', reward: { brick: 15 } },
+  { id: 'smelt', text: 'Matkabın önünden Demir Fırınına konveyör çek', reward: { brick: 15 } },
   { id: 'iron20', text: 'Ana Üs\'e 20 Demir Külçe teslim et (fırından üsse konveyör)', reward: { iron_ingot: 30, copper_ingot: 20 } },
-  { id: 'brick10', text: 'Taş yatağından Beton Blok üret ve 10 tane teslim et', reward: { iron_ingot: 25 } },
+  { id: 'brick10', text: 'Taş yatağından Taş Fırınıyla Beton Blok üret ve 10 tane teslim et', reward: { iron_ingot: 25 } },
   { id: 'gen', text: 'Kömür yatağından beslenen bir Kömür Jeneratörü çalıştır', reward: { copper_ingot: 30 } },
+  { id: 'pole', text: 'Elektrik Direği kurarak şebekeni uzak yataklara genişlet', reward: { copper_ingot: 20, iron_ingot: 20 } },
   { id: 'turrets', text: 'Üssünü korumak için 3 Makineli Taret kur', reward: { ammo: 150 } },
   { id: 'otomasyon', text: 'Araştırma: Otomasyon', reward: { iron_ingot: 40 } },
   { id: 'metalurji', text: 'Araştırma: Metalurji', reward: { brick: 60 } },
@@ -29,7 +36,8 @@ const OBJECTIVES = [
 export class Game {
   constructor(opts = {}) {
     this.seed = opts.seed ?? Math.floor(Math.random() * 1e9);
-    this.world = new World(this.seed);
+    this.preset = opts.preset || 'mixed';
+    this.world = new World(this.seed, this.preset);
     this.grid = new Int32Array(MAP_W * MAP_H);
     this.buildings = new Map();
     this.units = [];
@@ -44,7 +52,10 @@ export class Game {
     this.researched = new Set();
     this.time = DAY_LENGTH * 0.12;
     this.speed = 1;
-    this.power = { supply: 0, demand: 0, ratio: 1, base: 0 };
+    this.power = { supply: 0, demand: 0, ratio: 1, cap: 0, store: 0, storeCap: 0, unpowered: 0 };
+    this.pnet = { nets: [], links: [], version: 0 };
+    this.gridDirty = true;
+    this.wind = 0.6;
     this.wave = { n: 0, next: DAY_LENGTH * 1.53, warned: false };
     this.rivals = RIVALS.map((r) => ({ ...r, alive: true, hq: 0, turrets: 0 }));
     this.objective = 0;
@@ -68,14 +79,13 @@ export class Game {
 
   buildRivalBase(r) {
     const hq = this.placeBuilding('hq', r.x, r.y, 0, r.id, true);
-    hq.maxHp = hq.hp = 6000;
+    hq.maxHp = hq.hp = r.hp || 6000;
     r.hq = hq.id;
     const ring = [[-2, -1], [4, 3], [-2, 3], [4, -1]];
     ring.forEach(([dx, dy], i) => {
-      this.placeBuilding(i % 2 === 0 ? 'turret_mg' : 'turret_cannon', r.x + dx, r.y + dy, 2, r.id, true);
-      r.turrets++;
+      if (this.placeBuilding(i % 2 === 0 ? 'turret_mg' : 'turret_cannon', r.x + dx, r.y + dy, 2, r.id, true)) r.turrets++;
     });
-    // yarım duvar halkası (oyuncuya bakan taraf)
+    // oyuncuya bakan tarafta yarım duvar halkası
     for (let dy = -3; dy <= 5; dy++) {
       if (dy === 1) continue;
       this.placeBuilding('wall', r.x - 4, r.y + dy, 0, r.id, true);
@@ -87,7 +97,8 @@ export class Game {
     for (let tries = 0; tries < 30; tries++) {
       const a = this.rnd() * Math.PI * 2, d = 3.5 + this.rnd() * 3.5;
       const x = Math.round(r.x + 1 + Math.cos(a) * d), y = Math.round(r.y + 1 + Math.sin(a) * d);
-      const type = this.wave.n > 4 && this.rnd() < 0.35 ? 'turret_laser' : this.rnd() < 0.5 ? 'turret_cannon' : 'turret_mg';
+      const q = this.rnd();
+      const type = this.wave.n > 8 && q < 0.2 ? 'turret_missile' : this.wave.n > 4 && q < 0.45 ? 'turret_laser' : q < 0.7 ? 'turret_cannon' : 'turret_mg';
       if (this.canPlace(type, x, y, true).ok) {
         this.placeBuilding(type, x, y, 2, r.id, true); r.turrets++; return;
       }
@@ -108,7 +119,11 @@ export class Game {
       if (!this.world.buildable(tx, ty)) return { ok: false, why: 'Bu zemine inşa edilemez' };
       if (this.grid[ty * MAP_W + tx]) return { ok: false, why: 'Alan dolu' };
     }
-    if (type === 'miner' && !this.world.oreAt(x, y)) return { ok: false, why: 'Cevher yatağı gerekli' };
+    if (def.mine) {
+      const ore = this.world.oreAt(x, y);
+      if (def.mine === 'oil' && ore !== 'oil') return { ok: false, why: 'Petrol sızıntısı gerekli' };
+      if (def.mine === 'solid' && (!ore || ore === 'oil')) return { ok: false, why: ore === 'oil' ? 'Petrol için Petrol Pompası gerekli' : 'Cevher yatağı gerekli' };
+    }
     if (!free && !this.canAfford(def.cost)) return { ok: false, why: 'Yetersiz malzeme' };
     return { ok: true };
   }
@@ -132,23 +147,24 @@ export class Game {
     return b;
   }
   initBuilding(b) {
-    switch (b.type) {
-      case 'belt': b.items = []; break;
-      case 'miner': {
-        const i = b.y * MAP_W + b.x;
-        b.ore = ORE_TYPES[this.world.ore[i]]; b.purity = this.world.purity[i];
-        b.outBuf = []; b.progress = 0; break;
-      }
-      case 'smelter': case 'assembler': case 'foundry':
-        b.recipe = b.recipe ?? (b.type === 'assembler' ? 'gear' : b.type === 'foundry' ? 'steel' : null);
-        b.inBuf = b.inBuf ?? {}; b.outBuf = b.outBuf ?? []; b.progress = b.progress ?? 0; break;
-      case 'generator': b.fuel = b.fuel ?? 0; b.burn = b.burn ?? 0; break;
-      case 'splitter': b.hold = null; b.rr = 0; break;
-      case 'factory': b.queue = b.queue ?? []; b.progress = b.progress ?? 0; break;
-      case 'turret_mg': case 'turret_cannon': case 'turret_laser':
-        b.yaw = (b.yaw ?? -b.dir * Math.PI / 2); b.cd = 0; b.target = null; b.retarget = 0; break;
+    const def = BUILDINGS[b.type];
+    if (b.items || def.line && def.speed) b.items = b.items ?? [];
+    if (def.mine) {
+      const i = b.y * MAP_W + b.x;
+      b.ore = ORE_TYPES[this.world.ore[i]]; b.purity = this.world.purity[i];
+      b.outBuf = b.outBuf ?? []; b.progress = b.progress ?? 0;
     }
+    if (def.machine) {
+      if (b.recipe === undefined || (b.recipe && RECIPES[b.recipe]?.building !== b.type)) b.recipe = def.auto ? null : RECIPES_OF[b.type][0];
+      b.inBuf = b.inBuf ?? {}; b.outBuf = b.outBuf ?? []; b.progress = b.progress ?? 0; b.orr = 0;
+    }
+    if (def.fuel) { b.fuel = b.fuel ?? 0; b.burn = b.burn ?? 0; }
+    if (def.store) b.charge = b.charge ?? 0;
+    if (b.type === 'splitter') { b.hold = null; b.rr = 0; }
+    if (b.type === 'factory') { b.queue = b.queue ?? []; b.progress = b.progress ?? 0; }
+    if (def.range) { b.yaw = (b.yaw ?? -b.dir * Math.PI / 2); b.cd = 0; b.target = null; b.retarget = 0; }
     b.working = false;
+    b.net = -1;
   }
   addBuildingObj(b) {
     for (const [tx, ty] of this.footprint(b.type, b.x, b.y)) {
@@ -158,6 +174,7 @@ export class Game {
     }
     this.buildings.set(b.id, b);
     this.fieldDirty = true;
+    if (b.faction === 0) this.gridDirty = true;
     this.emit('add', b);
   }
   removeBuilding(b, destroyed = false) {
@@ -165,22 +182,44 @@ export class Game {
     for (const [tx, ty] of this.footprint(b.type, b.x, b.y)) this.grid[ty * MAP_W + tx] = 0;
     this.buildings.delete(b.id);
     this.fieldDirty = true;
+    if (b.faction === 0) this.gridDirty = true;
     this.emit('remove', b, destroyed);
   }
-  demolish(b) {
-    if (b.type === 'hq' || b.faction !== 0) return false;
+  refund(b, frac) {
     const cost = BUILDINGS[b.type].cost;
-    for (const k in cost) this.stock[k] += Math.floor(cost[k] * 0.6);
+    for (const k in cost) this.stock[k] += Math.floor(cost[k] * frac);
     if (b.items) for (const it of b.items) this.stock[it.t]++;
     if (b.outBuf) for (const t of b.outBuf) this.stock[t]++;
     if (b.inBuf) for (const k in b.inBuf) this.stock[k] += b.inBuf[k];
+    if (b.hold) this.stock[b.hold]++;
+  }
+  demolish(b) {
+    if (b.type === 'hq' || b.faction !== 0) return false;
+    this.refund(b, 0.6);
+    if (b.fuel) this.stock[BUILDINGS[b.type].fuel] += b.fuel;
     this.removeBuilding(b);
     return true;
   }
+  // konveyörü başka türle değiştir (yükseltme)
+  replaceBelt(ex, type, dir) {
+    if (ex.faction !== 0 || !this.unlocked.has(type) || !this.canAfford(BUILDINGS[type].cost)) return null;
+    const items = ex.items || [];
+    const cost = BUILDINGS[ex.type].cost;
+    for (const k in cost) this.stock[k] += cost[k];
+    this.removeBuilding(ex);
+    const b = this.placeBuilding(type, ex.x, ex.y, dir);
+    if (b) b.items = items.slice(0, 3);
+    return b;
+  }
   rotate(b) {
-    if (b.faction !== 0 || b.size > 1 || b.type === 'hq') return;
+    if (b.faction !== 0 || b.type === 'hq') return;
     b.dir = (b.dir + 1) % 4;
-    if (b.type.startsWith('turret')) b.yaw = -b.dir * Math.PI / 2;
+    if (BUILDINGS[b.type].range) b.yaw = -b.dir * Math.PI / 2;
+    this.emit('update', b);
+  }
+  toggle(b) {
+    if (b.faction !== 0 || b.type === 'hq') return;
+    b.off = !b.off;
     this.emit('update', b);
   }
   at(x, y) {
@@ -190,10 +229,12 @@ export class Game {
   }
 
   // ---------- araştırma ----------
+  techReqs(t) { return t.req ? (Array.isArray(t.req) ? t.req : [t.req]) : []; }
+  techAvailable(t) { return this.techReqs(t).every((r) => this.researched.has(r)); }
   research(id) {
     const t = TECH.find((q) => q.id === id);
     if (!t || this.researched.has(id)) return false;
-    if (t.req && !this.researched.has(t.req)) return false;
+    if (!this.techAvailable(t)) return false;
     if (!this.canAfford(t.cost)) return false;
     this.pay(t.cost);
     this.researched.add(id);
@@ -215,43 +256,46 @@ export class Game {
   }
 
   // ---------- eşya aktarımı ----------
-  // fromSide: hedef binanın hangi yüzünden giriyor (0..3, hedefin merkezinden kaynağa yön)
+  // fromSide: eşyanın hedef binaya hangi yönden girdiği (hedeften kaynağa yön)
   accept(b, t, fromSide) {
     if (b.faction !== 0) return false;
-    switch (b.type) {
-      case 'belt': {
-        if (fromSide === b.dir) return false;
-        const it = b.items;
-        if (it.length >= 3) return false;
-        if (it.length && it[it.length - 1].p < BELT_GAP) return false;
-        it.push({ t, p: 0, s: fromSide });
-        return true;
+    const def = BUILDINGS[b.type];
+    if (b.items) {
+      if (fromSide === b.dir) return false;
+      const it = b.items;
+      if (it.length >= 3) return false;
+      if (it.length && it[it.length - 1].p < BELT_GAP) return false;
+      it.push({ t, p: 0, s: fromSide });
+      return true;
+    }
+    if (def.machine) {
+      if (!b.recipe && def.auto) {
+        const r = RECIPES_OF[b.type].find((k) => RECIPES[k].inp[t]);
+        if (!r) return false;
+        b.recipe = r; this.emit('update', b);
       }
-      case 'splitter':
-        if (b.hold) return false;
-        b.hold = t; b.holdFrom = fromSide; return true;
-      case 'smelter': case 'assembler': case 'foundry': {
-        if (!b.recipe && b.type === 'smelter') {
-          const r = Object.keys(RECIPES).find((k) => RECIPES[k].building === 'smelter' && RECIPES[k].inp[t]);
-          if (!r) return false;
-          b.recipe = r; this.emit('update', b);
-        }
-        const r = RECIPES[b.recipe];
-        if (!r || !r.inp[t]) return false;
-        if ((b.inBuf[t] || 0) >= r.inp[t] * 3 + 1) return false;
-        b.inBuf[t] = (b.inBuf[t] || 0) + 1;
-        return true;
-      }
-      case 'generator':
-        if (t !== 'coal' || b.fuel >= 8) return false;
-        b.fuel++; return true;
-      case 'hq':
-        this.stock[t] = (this.stock[t] || 0) + 1;
-        this.delivered[t] = (this.delivered[t] || 0) + 1;
-        return true;
-      case 'turret_mg': case 'turret_cannon':
-        if (t !== 'ammo') return false;
-        this.stock.ammo++; return true;
+      const r = RECIPES[b.recipe];
+      if (!r || !r.inp[t]) return false;
+      if ((b.inBuf[t] || 0) >= r.inp[t] * 3 + 1) return false;
+      b.inBuf[t] = (b.inBuf[t] || 0) + 1;
+      return true;
+    }
+    if (def.fuel) {
+      if (t !== def.fuel || b.fuel >= FUEL_CAP[t]) return false;
+      b.fuel++; return true;
+    }
+    if (b.type === 'splitter') {
+      if (b.hold) return false;
+      b.hold = t; b.holdFrom = fromSide; return true;
+    }
+    if (b.type === 'hq') {
+      this.stock[t] = (this.stock[t] || 0) + 1;
+      this.delivered[t] = (this.delivered[t] || 0) + 1;
+      return true;
+    }
+    if (def.range && def.ammo) {
+      if (t !== (def.ammoItem || 'ammo')) return false;
+      this.stock[t]++; return true;
     }
     return false;
   }
@@ -260,6 +304,19 @@ export class Game {
     const tgt = this.at(tx, ty);
     if (!tgt || tgt === b) return false;
     return this.accept(tgt, t, (dir + 2) % 4);
+  }
+  // çok karolu binalar: ön yüzdeki karolara sırayla dene
+  pushOut(b, t) {
+    if (b.size === 1) return this.pushTo(b, b.dir, t);
+    const s = b.size, d = b.dir;
+    for (let k = 0; k < s; k++) {
+      const j = (b.orr + k) % s;
+      let tx, ty;
+      if (d === 0) { tx = b.x + s; ty = b.y + j; } else if (d === 2) { tx = b.x - 1; ty = b.y + j; } else if (d === 1) { tx = b.x + j; ty = b.y + s; } else { tx = b.x + j; ty = b.y - 1; }
+      const tgt = this.at(tx, ty);
+      if (tgt && tgt !== b && this.accept(tgt, t, (d + 2) % 4)) { b.orr = (j + 1) % s; return true; }
+    }
+    return false;
   }
 
   // ---------- güncelleme ----------
@@ -277,6 +334,7 @@ export class Game {
     const t = this.dayPhase();
     return t < 0.65 ? Math.sin(Math.PI * t / 0.65) : -Math.sin(Math.PI * (t - 0.65) / 0.35) * 0.6;
   }
+  isNight() { return this.sunLevel() < 0.1; }
   clock() {
     const t = this.dayPhase();
     const h = t < 0.65 ? 6 + (t / 0.65) * 13 : 19 + ((t - 0.65) / 0.35) * 11;
@@ -285,39 +343,141 @@ export class Game {
   }
   day() { return Math.floor(this.time / DAY_LENGTH) + 1; }
 
-  step(dt) {
-    this.time += dt;
-    // enerji
-    const sun = Math.max(0, this.sunLevel());
-    let base = 0, gen = 0, demand = 0, genCap = 0;
+  // ---------- elektrik şebekesi ----------
+  center(b) { const s = b.size / 2; return [b.x + s, b.y + s]; }
+  rebuildGrid() {
+    const nodes = [], consumers = [], lamps = [];
     for (const b of this.buildings.values()) {
       if (b.faction !== 0) continue;
-      if (b.type === 'hq') base += 30;
-      else if (b.type === 'solar') base += 25 * Math.min(1, sun * 1.4);
-      else if (b.type === 'generator') genCap += 80;
-      else if (b.working) demand += BUILDINGS[b.type].power;
+      const d = BUILDINGS[b.type];
+      b.net = -1; b.lit = false;
+      if (d.node) nodes.push(b);
+      else if (d.power) consumers.push(b);
+      if (b.type === 'lamp') lamps.push(b);
     }
-    const needGen = demand > base;
-    for (const b of this.buildings.values()) {
-      if (b.type !== 'generator') continue;
-      if (b.burn <= 0 && needGen && b.fuel > 0) { b.fuel--; b.burn = 7; this.stats.gensBurned++; }
-      b.working = b.burn > 0;
-      if (b.burn > 0) { b.burn -= dt; gen += 80; }
-    }
-    this.power.supply = base + gen; this.power.demand = demand; this.power.cap = base + genCap;
-    this.power.ratio = demand > 0 ? Math.min(1, (base + gen) / demand) : 1;
-    const pr = this.power.ratio;
-
-    for (const b of this.buildings.values()) {
-      switch (b.type) {
-        case 'belt': this.stepBelt(b, dt); break;
-        case 'miner': this.stepMiner(b, dt, pr); break;
-        case 'smelter': case 'assembler': case 'foundry': this.stepMachine(b, dt, pr); break;
-        case 'splitter': this.stepSplitter(b); break;
-        case 'factory': this.stepFactory(b, dt, pr); break;
-        case 'turret_mg': case 'turret_cannon': case 'turret_laser': this.stepTurret(b, dt, pr); break;
-        case 'hq': this.stepHQ(b, dt); break;
+    const parent = nodes.map((_, i) => i);
+    const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    const links = [];
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i], [ax, ay] = this.center(a), la = BUILDINGS[a.type].node.link;
+      for (let j = i + 1; j < nodes.length; j++) {
+        const b = nodes[j], [bx, by] = this.center(b);
+        const L = Math.min(la, BUILDINGS[b.type].node.link);
+        if ((ax - bx) ** 2 + (ay - by) ** 2 <= L * L) {
+          links.push([a, b]);
+          const ra = find(i), rb = find(j);
+          if (ra !== rb) parent[ra] = rb;
+        }
       }
+    }
+    const nets = []; const rootNet = new Map();
+    nodes.forEach((b, i) => {
+      const r = find(i);
+      if (!rootNet.has(r)) { rootNet.set(r, nets.length); nets.push({ id: nets.length, nodes: [], consumers: [], ratio: 1, supply: 0, demand: 0, cap: 0, store: 0, storeCap: 0, hasHq: false }); }
+      const n = nets[rootNet.get(r)];
+      b.net = n.id; n.nodes.push(b);
+      if (b.type === 'hq') n.hasHq = true;
+    });
+    for (const c of consumers) {
+      const [cx, cy] = this.center(c);
+      let best = null, bd = Infinity;
+      for (const n of nodes) {
+        const [nx, ny] = this.center(n);
+        const d = Math.hypot(nx - cx, ny - cy);
+        const reach = BUILDINGS[n.type].node.cover + c.size / 2 + (n.size - 1) / 2;
+        if (d <= reach && d < bd) { bd = d; best = n; }
+      }
+      if (best) { c.net = best.net; nets[best.net].consumers.push(c); }
+    }
+    // projektör ışığındaki yapılar
+    if (lamps.length) {
+      for (const b of this.buildings.values()) {
+        if (b.faction !== 0 || !BUILDINGS[b.type].range) continue;
+        const [cx, cy] = this.center(b);
+        b.lit = lamps.some((l) => (l.x + 0.5 - cx) ** 2 + (l.y + 0.5 - cy) ** 2 <= LAMP_R * LAMP_R);
+      }
+    }
+    this.pnet = { nets, links, version: this.pnet.version + 1 };
+    this.gridDirty = false;
+    this.emit('grid');
+  }
+  pr(b) {
+    if (b.faction !== 0) return 1;
+    const d = BUILDINGS[b.type];
+    if (!d.power) return 1;
+    if (b.off) return 0;
+    const n = this.pnet.nets[b.net];
+    return n ? n.ratio : 0;
+  }
+  stepPower(dt) {
+    if (this.gridDirty) this.rebuildGrid();
+    const sun = Math.max(0, this.sunLevel());
+    // rüzgar: yavaşça değişen, gece biraz daha güçlü
+    const t = this.time;
+    this.wind = Math.max(0.2, Math.min(1, 0.55 + 0.25 * Math.sin(t * 0.011) + 0.15 * Math.sin(t * 0.047 + 1.3) + 0.08 * Math.sin(t * 0.13 + 2) + (sun <= 0 ? 0.1 : 0)));
+    let tot = { supply: 0, demand: 0, cap: 0, store: 0, storeCap: 0, unpowered: 0 };
+    for (const n of this.pnet.nets) {
+      let base = 0, genCap = 0, demand = 0, store = 0, storeCap = 0, rate = 0;
+      const gens = [], bats = [];
+      for (const b of n.nodes) {
+        const d = BUILDINGS[b.type];
+        if (b.off) { b.working = false; continue; }
+        if (b.type === 'hq') base += d.gen;
+        else if (b.type === 'solar') { b.out = d.gen * Math.min(1, sun * 1.4); base += b.out; b.working = b.out > 0.5; }
+        else if (b.type === 'wind') { b.out = d.gen * this.wind; base += b.out; b.working = true; }
+        else if (d.fuel) { genCap += d.gen; gens.push(b); }
+        else if (d.store) { store += b.charge; storeCap += d.store; rate += d.rate; bats.push(b); }
+      }
+      for (const c of n.consumers) if (c.working && !c.off) demand += BUILDINGS[c.type].power;
+      // yakıtlı jeneratörler sadece gerektiğinde yakar (önce temel üretim, sonra akü)
+      let gen = 0;
+      const need = demand - base - (store > 1 ? Math.min(rate, store / dt) : 0);
+      let remain = need;
+      for (const b of gens) {
+        const d = BUILDINGS[b.type];
+        if (b.burn <= 0 && remain > 0 && b.fuel > 0) { b.fuel--; b.burn = d.burn; this.stats.gensBurned++; }
+        b.working = b.burn > 0;
+        if (b.burn > 0) { b.burn -= dt; gen += d.gen; remain -= d.gen; }
+      }
+      let supply = base + gen;
+      // akü
+      const diff = supply - demand;
+      if (bats.length) {
+        if (diff < 0 && store > 0) {
+          const take = Math.min(-diff, rate, store / dt);
+          supply += take;
+          for (const b of bats) { b.charge = Math.max(0, b.charge - take * dt * (b.charge / store)); b.working = true; }
+        } else if (diff > 0 && store < storeCap) {
+          const put = Math.min(diff, rate, (storeCap - store) / dt);
+          for (const b of bats) { const d = BUILDINGS[b.type]; b.charge = Math.min(d.store, b.charge + put * dt / bats.length); b.working = false; }
+        } else for (const b of bats) b.working = false;
+        store = bats.reduce((a, b) => a + b.charge, 0);
+      }
+      n.supply = supply; n.demand = demand; n.cap = base + genCap + rate; n.store = store; n.storeCap = storeCap;
+      n.ratio = demand > 0 ? Math.min(1, supply / demand) : 1;
+      tot.supply += supply; tot.demand += demand; tot.cap += n.cap; tot.store += store; tot.storeCap += storeCap;
+    }
+    for (const b of this.buildings.values()) if (b.faction === 0 && b.net < 0 && BUILDINGS[b.type].power && !BUILDINGS[b.type].node) tot.unpowered++;
+    tot.ratio = tot.demand > 0 ? Math.min(1, tot.supply / tot.demand) : 1;
+    // en kötü şebeke oranı (uyarı için)
+    tot.worst = this.pnet.nets.reduce((m, n) => (n.demand > 0 ? Math.min(m, n.ratio) : m), 1);
+    this.power = tot;
+  }
+
+  step(dt) {
+    this.time += dt;
+    this.stepPower(dt);
+    const night = this.isNight();
+    for (const b of this.buildings.values()) {
+      const d = BUILDINGS[b.type];
+      if (b.items) { this.stepBelt(b, dt, d.speed); continue; }
+      if (d.mine) this.stepMiner(b, dt, this.pr(b));
+      else if (d.machine) this.stepMachine(b, dt, this.pr(b));
+      else if (d.range) this.stepTurret(b, dt, this.pr(b), night);
+      else if (b.type === 'splitter') this.stepSplitter(b);
+      else if (b.type === 'factory') this.stepFactory(b, dt, this.pr(b));
+      else if (b.type === 'hq') this.stepHQ(b, dt);
+      else if (b.type === 'lamp') b.working = night && !b.off;
     }
     // akış alanları
     this.fieldTimer -= dt;
@@ -328,13 +488,13 @@ export class Game {
     this.checkObjectives();
   }
 
-  stepBelt(b, dt) {
+  stepBelt(b, dt, speed = 1) {
     const it = b.items;
     if (!it.length) return;
-    const adv = BELT_SPEED * dt;
+    const adv = BELT_SPEED * speed * dt;
     for (let k = 0; k < it.length; k++) {
       const item = it[k];
-      let lim = k === 0 ? 1 : it[k - 1].p - BELT_GAP;
+      const lim = k === 0 ? 1 : it[k - 1].p - BELT_GAP;
       item.p = Math.min(item.p + adv, Math.max(item.p, lim));
     }
     if (it[0].p >= 1) {
@@ -343,9 +503,10 @@ export class Game {
     }
   }
   stepMiner(b, dt, pr) {
-    b.working = b.outBuf.length < 2;
+    const d = BUILDINGS[b.type];
+    b.working = !b.off && b.outBuf.length < 2;
     if (b.working) {
-      b.progress += dt * pr * PURITY[b.purity].mul / MINER_TIME;
+      b.progress += dt * pr * PURITY[b.purity].mul * d.speed / MINER_TIME;
       if (b.progress >= 1) { b.progress -= 1; b.outBuf.push(b.ore); }
     }
     if (b.outBuf.length && this.pushTo(b, b.dir, b.outBuf[0])) b.outBuf.shift();
@@ -353,7 +514,7 @@ export class Game {
   stepMachine(b, dt, pr) {
     const r = RECIPES[b.recipe];
     b.working = false;
-    if (r) {
+    if (r && !b.off) {
       if (b.progress > 0 || this.hasInputs(b, r)) {
         if (b.progress === 0) { for (const k in r.inp) b.inBuf[k] -= r.inp[k]; b.progress = 1e-6; }
         if (b.outBuf.length < 6) {
@@ -366,7 +527,7 @@ export class Game {
         }
       }
     }
-    if (b.outBuf.length && this.pushTo(b, b.dir, b.outBuf[0])) b.outBuf.shift();
+    if (b.outBuf.length && this.pushOut(b, b.outBuf[0])) b.outBuf.shift();
   }
   hasInputs(b, r) { for (const k in r.inp) if ((b.inBuf[k] || 0) < r.inp[k]) return false; return true; }
   stepSplitter(b) {
@@ -378,7 +539,7 @@ export class Game {
     }
   }
   stepFactory(b, dt, pr) {
-    b.working = b.queue.length > 0;
+    b.working = b.queue.length > 0 && !b.off;
     if (!b.working) return;
     if (this.units.filter((u) => u.faction === 0).length >= MAX_UNITS) { b.working = false; return; }
     b.progress += dt * pr / UNITS[b.queue[0]].time;
@@ -393,7 +554,6 @@ export class Game {
 
   // ---------- savaş ----------
   hostile(fa, fb) { return (fa === 0) !== (fb === 0); }
-  canHit(attAir, target) { return !target.air || attAir; }
 
   findTarget(x, y, faction, range, aa) {
     let best = null, bd = range * range;
@@ -427,39 +587,46 @@ export class Game {
     if (t.kind === 'unit') return t.hp > 0 && this.units.includes(t);
     return this.buildings.get(t.id) === t;
   }
+  turretRange(b, night) {
+    const def = BUILDINGS[b.type];
+    return def.range * (b.lit && night ? 1.15 : 1);
+  }
 
-  stepTurret(b, dt, pr) {
+  stepTurret(b, dt, pr, night) {
     const def = BUILDINGS[b.type];
     b.cd -= dt;
     b.retarget -= dt;
     b.working = false;
+    if (b.off) { b.target = null; return; }
+    const range = this.turretRange(b, night);
     const cx = b.x + 0.5, cy = b.y + 0.5;
     if (b.retarget <= 0 || !this.alive(b.target)) {
-      b.target = this.findTarget(cx, cy, b.faction, def.range, def.air);
+      b.target = this.findTarget(cx, cy, b.faction, range, def.air);
       b.retarget = 0.4;
     }
     if (!b.target) return;
     const [tx, ty] = this.targetPos(b.target);
     const dx = tx - cx, dy = ty - cy;
-    if (dx * dx + dy * dy > def.range * def.range) { b.target = null; return; }
+    if (dx * dx + dy * dy > range * range) { b.target = null; return; }
     const want = Math.atan2(-dy, dx);
     let diff = want - b.yaw;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
     const turn = 4.5 * dt;
     b.yaw += Math.max(-turn, Math.min(turn, diff));
-    if (def.laser) b.working = true;
+    if (def.power) b.working = true;
     if (Math.abs(diff) > 0.2 || b.cd > 0) return;
     // mühimmat / enerji
     if (b.faction === 0) {
       if (def.ammo) {
-        if (this.stock.ammo < def.ammo) { b.noAmmo = true; return; }
-        this.stock.ammo -= def.ammo;
+        const item = def.ammoItem || 'ammo';
+        if (this.stock[item] < def.ammo) { b.noAmmo = true; return; }
+        this.stock[item] -= def.ammo;
       }
       b.noAmmo = false;
-      if (def.laser && pr < 0.3) return;
+      if (def.power && pr < 0.3) return;
     }
     b.cd = def.rate / (def.laser && b.faction === 0 ? Math.max(0.3, pr) : 1);
-    this.fire(b, cx, cy, b.target, def, b.type === 'turret_cannon' ? 'shell' : def.laser ? 'laser' : 'bullet');
+    this.fire(b, cx, cy, b.target, def, b.type === 'turret_cannon' ? 'shell' : def.rocket ? 'rocket' : def.laser ? 'laser' : 'bullet');
   }
 
   // karargâhların kendi hafif savunma topu var
@@ -479,9 +646,10 @@ export class Game {
   fire(src, x, y, target, def, kind) {
     const [tx, ty] = this.targetPos(target);
     const dmgMul = src.faction === 0 ? 1 : 1 + this.wave.n * 0.05;
-    if (kind === 'shell') {
+    if (kind === 'shell' || kind === 'rocket') {
       const d = Math.hypot(tx - x, ty - y);
-      this.projectiles.push({ x, y, tx, ty, t: 0, dur: 0.35 + d * 0.06, dmg: def.dmg * dmgMul, splash: def.splash || 1.5, faction: src.faction, air: false });
+      const dur = kind === 'rocket' ? 0.45 + d * 0.045 : 0.35 + d * 0.06;
+      this.projectiles.push({ kind, x, y, tx, ty, t: 0, dur, dmg: def.dmg * dmgMul, splash: def.splash || 1.5, faction: src.faction, target: kind === 'rocket' ? target : null });
       this.emit('shot', src, x, y, tx, ty, kind, target);
     } else {
       this.emit('shot', src, x, y, tx, ty, kind, target);
@@ -499,9 +667,26 @@ export class Game {
       this.emit('unitDie', t);
       if (t.faction !== 0) this.stats.kills++; else this.stats.lost++;
     } else {
-      this.emit('explode', t.x + t.size / 2, t.y + t.size / 2, t.size * 1.2 + (t.type === 'hq' ? 2 : 0));
+      const big = t.type === 'reactor';
+      this.emit('explode', t.x + t.size / 2, t.y + t.size / 2, t.size * 1.2 + (t.type === 'hq' ? 2 : 0) + (big ? 3 : 0));
       this.removeBuilding(t, true);
       if (t.type === 'hq') this.onHqDestroyed(t);
+      if (big) this.blast(t.x + 1, t.y + 1, 5, 900, -1);
+    }
+  }
+  // her iki tarafa da zarar veren patlama (reaktör)
+  blast(x, y, r, dmg, faction) {
+    for (const u of [...this.units]) {
+      const d = Math.hypot(u.x - x, u.y - y);
+      if (d < r) this.damage(u, dmg * (1 - d / r * 0.6), faction);
+    }
+    const seen = new Set();
+    for (let j = Math.floor(y - r); j <= y + r; j++) for (let i = Math.floor(x - r); i <= x + r; i++) {
+      const b = this.at(i, j);
+      if (!b || seen.has(b) || b.type === 'hq') continue;
+      seen.add(b);
+      const d = Math.hypot(i + 0.5 - x, j + 0.5 - y);
+      if (d < r) this.damage(b, dmg * (1 - d / r * 0.6), faction);
     }
   }
 
@@ -522,7 +707,7 @@ export class Game {
     }
     for (const u of [...this.units]) if (u.faction === r.id) this.damage(u, 1e9, 0);
     // ganimet
-    const loot = { steel: 60, circuit: 30, motor: 10, ammo: 300, iron_ingot: 150, copper_ingot: 100 };
+    const loot = { steel: 60, circuit: 30, motor: 10, ammo: 300, iron_ingot: 150, copper_ingot: 100, iron_plate: 60, aluminum: 20 };
     for (const k in loot) this.stock[k] += loot[k];
     this.emit('message', `${r.name} yok edildi! Ganimet depoya eklendi.`, 'good');
     if (this.rivals.every((q) => !q.alive)) { this.state = 'won'; this.emit('gameover', true); }
@@ -533,9 +718,12 @@ export class Game {
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       p.t += dt;
+      // güdümlü füze hedefi takip eder
+      if (p.target && this.alive(p.target)) { const [tx, ty] = this.targetPos(p.target); p.tx = tx; p.ty = ty; }
       if (p.t < p.dur) continue;
       this.projectiles.splice(i, 1);
-      this.emit('explode', p.tx, p.ty, 0.7);
+      this.emit('explode', p.tx, p.ty, p.kind === 'rocket' ? 0.9 : 0.7);
+      if (p.target && p.target.air && this.alive(p.target)) { this.damage(p.target, p.dmg, p.faction); continue; }
       const r2 = p.splash * p.splash;
       for (const u of [...this.units]) {
         if (!this.hostile(p.faction, u.faction) || u.air) continue;
@@ -588,13 +776,13 @@ export class Game {
     const nb = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414]];
     const terr = this.world.terrain;
     const tileCost = (k) => {
-      if (terr[k] >= 3) return Infinity;
+      if (isBlocked(terr[k])) return Infinity;
       const id = this.grid[k];
       if (!id) return 1;
       const b = this.buildings.get(id);
       const enemyOwned = b.faction !== 0;
       if (mover === 'enemy') return enemyOwned ? 3 : 1 + Math.min(12, b.hp / 80);
-      return enemyOwned ? 1 + Math.min(12, b.hp / 80) : (b.type === 'belt' ? 1.2 : 3);
+      return enemyOwned ? 1 + Math.min(12, b.hp / 80) : (b.items ? 1.2 : 3);
     };
     while (heap.size) {
       const k = heap.pop();
@@ -603,7 +791,7 @@ export class Game {
       for (const [dx, dy, c] of nb) {
         const nx = x + dx, ny = y + dy;
         if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-        if (dx && dy && (terr[y * W + nx] >= 3 || terr[ny * W + x] >= 3)) continue;
+        if (dx && dy && (isBlocked(terr[y * W + nx]) || isBlocked(terr[ny * W + x]))) continue;
         const nk = ny * W + nx;
         const tc = tileCost(nk);
         if (tc === Infinity) continue;
@@ -632,7 +820,7 @@ export class Game {
         if (d > r) { u.target = null; }
         else {
           const want = Math.atan2(-dy, dx);
-          let diff = Math.atan2(Math.sin(want - u.tyaw), Math.cos(want - u.tyaw));
+          const diff = Math.atan2(Math.sin(want - u.tyaw), Math.cos(want - u.tyaw));
           u.tyaw += Math.max(-6 * dt, Math.min(6 * dt, diff));
           if (u.cd <= 0 && Math.abs(diff) < 0.3) {
             u.cd = def.rate;
@@ -698,7 +886,7 @@ export class Game {
           a.x -= nx; a.y -= ny; b.x += nx; b.y += ny;
         }
       }
-      // su/kaya içine girmeyi engelle
+      // su/kaya/lav içine girmeyi engelle
       if (!a.air) {
         a.x = Math.max(0.3, Math.min(MAP_W - 0.3, a.x));
         a.y = Math.max(0.3, Math.min(MAP_H - 0.3, a.y));
@@ -769,11 +957,12 @@ export class Game {
     let done = false;
     const count = (t, f) => { let c = 0; for (const b of this.buildings.values()) if (b.faction === 0 && b.type === t && (!f || f(b))) c++; return c; };
     switch (o.id) {
-      case 'miner': done = count('miner', (b) => b.ore === 'iron_ore') > 0; break;
-      case 'smelt': done = count('smelter', (b) => b.progress > 0 || b.outBuf.length > 0) > 0; break;
+      case 'miner': done = count('miner', (b) => b.ore === 'iron_ore') + count('miner_mk2', (b) => b.ore === 'iron_ore') > 0; break;
+      case 'smelt': done = count('smelter_iron', (b) => b.progress > 0 || b.outBuf.length > 0) > 0; break;
       case 'iron20': done = (this.delivered.iron_ingot || 0) >= 20; break;
       case 'brick10': done = (this.delivered.brick || 0) >= 10; break;
       case 'gen': done = this.stats.gensBurned > 0; break;
+      case 'pole': done = count('pole') > 0; break;
       case 'turrets': done = count('turret_mg') >= 3; break;
       case 'otomasyon': case 'metalurji': case 'elektronik': done = this.researched.has(o.id); break;
       case 'army': done = this.units.filter((u) => u.faction === 0).length >= 5; break;
@@ -802,11 +991,14 @@ export class Game {
       if (b.outBuf) o.outBuf = b.outBuf;
       if (b.progress) o.progress = b.progress;
       if (b.fuel) o.fuel = b.fuel;
+      if (b.burn > 0) o.burn = +b.burn.toFixed(1);
+      if (b.charge) o.charge = Math.round(b.charge);
       if (b.queue) o.queue = b.queue;
+      if (b.off) o.off = 1;
       bs.push(o);
     }
     return {
-      v: 1, seed: this.seed, time: this.time, nextId: this.nextId, stock: this.stock, delivered: this.delivered,
+      v: 2, seed: this.seed, preset: this.preset, time: this.time, nextId: this.nextId, stock: this.stock, delivered: this.delivered,
       unlocked: [...this.unlocked], unitUnlocked: [...this.unitUnlocked], researched: [...this.researched],
       wave: this.wave, rivals: this.rivals, objective: this.objective, stats: this.stats, trees: Array.from(this.world.tree),
       buildings: bs,
@@ -814,10 +1006,12 @@ export class Game {
     };
   }
   static load(data) {
-    const g = new Game({ seed: data.seed });
+    if (data.v !== 2) throw new Error('eski kayıt sürümü');
+    const g = new Game({ seed: data.seed, preset: data.preset });
     g.time = data.time; g.stock = { ...g.stock, ...data.stock }; g.delivered = data.delivered || {};
     g.unlocked = new Set(data.unlocked); g.unitUnlocked = new Set(data.unitUnlocked); g.researched = new Set(data.researched);
-    g.wave = data.wave; g.rivals = data.rivals; g.objective = data.objective; g.stats = data.stats || g.stats;
+    g.wave = data.wave; g.objective = data.objective; g.stats = data.stats || g.stats;
+    g.rivals = g.rivals.map((r) => ({ ...r, ...(data.rivals.find((q) => q.id === r.id) || {}) }));
     if (data.trees) g.world.tree.set(data.trees);
     g._pending = data;
     return g;
@@ -825,11 +1019,12 @@ export class Game {
   restore() {
     const data = this._pending; if (!data) return;
     for (const o of data.buildings) {
+      if (!BUILDINGS[o.type]) continue;
       const b = { id: o.id, type: o.type, x: o.x, y: o.y, dir: o.dir, size: BUILDINGS[o.type].size, faction: o.f, hp: o.hp, maxHp: o.mhp, born: -10 };
       if (o.items) b.items = o.items.map(([t, p, s]) => ({ t, p, s }));
       b.recipe = o.recipe; b.inBuf = o.inBuf; b.outBuf = o.outBuf; b.progress = o.progress; b.fuel = o.fuel; b.queue = o.queue;
+      b.burn = o.burn; b.charge = o.charge; b.off = !!o.off;
       this.initBuilding(b);
-      if (o.items) b.items = o.items.map(([t, p, s]) => ({ t, p, s }));
       this.addBuildingObj(b);
     }
     this.nextId = Math.max(data.nextId, this.nextId);

@@ -174,3 +174,21 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
   #status .speed button { padding: 5px 6px; }
   #objective { max-width: 60vw; }
 }
+
+/* v1.1 */
+#cats { overflow-x: auto; scrollbar-width: none; flex-shrink: 1; min-width: 0; }
+#cats::-webkit-scrollbar { display: none; }
+#cats button { flex-shrink: 0; padding: 4px 10px; }
+#st-power { cursor: pointer; }
+.maps { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.mapc { text-align: left; border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: rgba(255,255,255,.05); display: flex; flex-direction: column; gap: 4px; }
+.mapc b { font-size: 15px; color: var(--acc2); }
+.mapc small { color: var(--dim); line-height: 1.35; }
+.mapc:active { background: rgba(240,168,48,.2); }
+.pcols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mbody h4 { margin: 10px 0 4px; color: var(--acc2); }
+.prow { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.prow img { width: 26px; height: 26px; }
+.prow span { flex: 1; }
+.prow small { color: var(--dim); }
+@media (max-width: 600px) { .pcols { grid-template-columns: 1fr; } }

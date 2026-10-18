@@ -46,6 +46,7 @@ export class Audio {
     switch (kind) {
       case 'bullet': if (this.throttle('b', 55)) { this.noiseBurst(0.07, 3500, 600, 0.35 * vol, 'bandpass', 0.8); this.tone(0.05, 180, 60, 0.15 * vol, 'square'); } break;
       case 'shell': if (this.throttle('s', 120)) { this.noiseBurst(0.35, 900, 80, 0.8 * vol); this.tone(0.25, 90, 35, 0.5 * vol); } break;
+      case 'rocket': if (this.throttle('r', 150)) { this.noiseBurst(0.7, 2500, 300, 0.5 * vol, 'bandpass', 0.7); this.tone(0.4, 300, 90, 0.2 * vol, 'sawtooth'); } break;
       case 'laser': if (this.throttle('l', 90)) this.tone(0.16, 1800, 300, 0.12 * vol, 'sawtooth'); break;
       case 'boom': if (this.throttle('x', 70)) { this.noiseBurst(0.9, 1400, 40, 1.0 * vol); this.tone(0.6, 70, 25, 0.7 * vol); } break;
       case 'build': this.tone(0.08, 520, 400, 0.15, 'triangle'); this.noiseBurst(0.12, 2000, 300, 0.2, 'bandpass', 2, 0.03); break;

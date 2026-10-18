@@ -114,6 +114,9 @@ export class Effects {
     const sg = new THREE.SphereGeometry(0.14, 8, 6);
     const sm = new THREE.MeshBasicMaterial({ color: 0xffc070, toneMapped: false });
     this.shellPool = new FramePool(scene, sg, sm, { cast: false, receive: false });
+    const rg = new THREE.CylinderGeometry(0.07, 0.09, 0.7, 8); rg.rotateZ(-Math.PI / 2);
+    this.rocketPool = new FramePool(scene, rg, new THREE.MeshStandardMaterial({ color: 0xd8d8d0, metalness: 0.6, roughness: 0.35 }), { cast: false, receive: false });
+    this._a = new THREE.Vector3(); this._b = new THREE.Vector3(); this._x = new THREE.Vector3(1, 0, 0);
     // ışık havuzu
     this.lights = [];
     const nl = quality === 'low' ? 2 : 4;
@@ -165,6 +168,13 @@ export class Effects {
     this.smoke.emit(x + (Math.random() - 0.5) * 0.2, y, z + (Math.random() - 0.5) * 0.2, 0.25 + Math.random() * 0.2, 1.1 + Math.random() * 0.4, 0.1 + (Math.random() - 0.5) * 0.3,
       3 + Math.random() * 2, 0.35, 0.7, g, g, g * 1.02, dark ? 0.55 : 0.35, 0.8);
   }
+  steam(x, y, z) {
+    for (let i = 0; i < 2; i++) {
+      const g = 0.82 + Math.random() * 0.1;
+      this.smoke.emit(x + (Math.random() - 0.5) * 1.2, y, z + (Math.random() - 0.5) * 1.2, 0.3 + Math.random() * 0.2, 1.4 + Math.random() * 0.6, (Math.random() - 0.5) * 0.3,
+        4 + Math.random() * 2, 1.0, 1.4, g, g, g * 1.03, 0.32, 0.85);
+    }
+  }
   dust(x, z, s = 1) {
     for (let i = 0; i < 8 * s; i++) {
       const a = Math.random() * 6.28, sp = 1 + Math.random() * 2;
@@ -196,9 +206,24 @@ export class Effects {
       this.tracerPool.push(m, tr.col[0] * f, tr.col[1] * f, tr.col[2] * f);
     }
     this.tracerPool.end();
-    this.shellPool.begin();
+    this.shellPool.begin(); this.rocketPool.begin();
     for (const p of game.projectiles) {
       const k = p.t / p.dur;
+      if (p.kind === 'rocket') {
+        const pos = (kk, o) => {
+          const x = p.x + (p.tx - p.x) * kk, y = p.y + (p.ty - p.y) * kk;
+          const w = toWorld(x, y);
+          return o.set(w.x, 1 + Math.sin(kk * Math.PI) * (1.5 + p.dur * 3), w.z);
+        };
+        const a = pos(k, this._a), b = pos(Math.min(1, k + 0.03), this._b);
+        v.subVectors(b, a); if (v.lengthSq() < 1e-6) v.set(1, 0, 0); v.normalize();
+        q.setFromUnitVectors(this._x, v);
+        m.compose(a, q, s.set(1, 1, 1));
+        this.rocketPool.push(m);
+        this.fire.emit(a.x - v.x * 0.4, a.y - v.y * 0.4, a.z - v.z * 0.4, -v.x, -v.y, -v.z, 0.12, 0.4, 1.2, 3.2, 1.6, 0.5, 1);
+        if (Math.random() < 0.7) this.smoke.emit(a.x, a.y, a.z, (Math.random() - 0.5) * 0.3, 0.2, (Math.random() - 0.5) * 0.3, 1.2, 0.3, 0.9, 0.6, 0.6, 0.6, 0.45, 0.5);
+        continue;
+      }
       const x = p.x + (p.tx - p.x) * k, y = p.y + (p.ty - p.y) * k;
       const w = toWorld(x, y);
       const h = 1 + Math.sin(k * Math.PI) * (2 + p.dur * 6);
@@ -206,6 +231,6 @@ export class Effects {
       this.shellPool.push(m);
       if (Math.random() < 0.5) this.trail(w.x, h, w.z);
     }
-    this.shellPool.end();
+    this.shellPool.end(); this.rocketPool.end();
   }
 }

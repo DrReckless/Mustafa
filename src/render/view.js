@@ -5,22 +5,50 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { TILE, MAP_W, MAP_H, DX, DY, BUILDINGS, UNITS, RECIPES } from '../config.js';
-import { getModel, itemModels, materials } from './models.js';
+import { getModel, itemModels, materials, MODEL_META } from './models.js';
 import { Pool, FramePool } from './pool.js';
 import { Terrain } from './terrain.js';
 import { Effects } from './effects.js';
 import { clamp, lerp } from '../util.js';
 
-const FACTION_COL = { 0: new THREE.Color(0x3a74c4), 1: new THREE.Color(0xb3352a), 2: new THREE.Color(0xc96f1c) };
+const FACTION_COL = { 0: new THREE.Color(0x3a74c4), 1: new THREE.Color(0xb3352a), 2: new THREE.Color(0xc96f1c), 3: new THREE.Color(0x6e3fa8) };
 const MUZZLE = {
-  hq: { py: 3.6, f: 0.6, u: 0 }, turret_mg: { py: 0.75, f: 1.4, u: 0.3 }, turret_cannon: { py: 0.95, f: 2.4, u: 0.35 }, turret_laser: { py: 1.25, f: 0.95, u: 0 },
+  hq: { py: 3.6, f: 0.6, u: 0 }, turret_missile: MODEL_META.muzzle.turret_missile, turret_mg: { py: 0.75, f: 1.4, u: 0.3 }, turret_cannon: { py: 0.95, f: 2.4, u: 0.35 }, turret_laser: { py: 1.25, f: 0.95, u: 0 },
   mech: { py: 0.95, f: 0.75, u: 0.3 }, tank: { py: 0.72, f: 1.45, u: 0.18 }, drone: { py: 0, f: 0.35, u: -0.05 },
   raider: { py: 0.85, f: 0.35, u: 0 }, brute: { py: 0.95, f: 1.9, u: 0.22 }, wasp: { py: 0, f: 0.4, u: -0.05 },
 };
-const CHIMNEY = {
-  smelter: [[-0.45, 3.95, -0.38]], foundry: [[-0.15, 3.65, 0]], generator: [[0.55, 2.2, 0.55]],
-  factory: [[-1.6, 4.2, -1.2], [-1.6, 4.2, 1.2]],
-};
+const CHIMNEY = MODEL_META.chimney;
+// kablo bağlantı yükseklikleri
+const ATTACH = { pole: 3.3, pole_big: 5.8, hq: 3.5, reactor: 2.6, wind: 1.6, solar: 1.2 };
+// statik (her karede matrisi güncellenmeyen) animasyon türleri
+const STATIC_ANIMS = new Set(['static', 'belt', 'beltFast', 'window', 'status', 'furnace', 'beacon', 'arc', 'charge', 'lamp']);
+const _ax = new THREE.Vector3(1, 0, 0), _az = new THREE.Vector3(0, 0, 1);
+const LAMP_COL = [1.0, 0.92, 0.75], WARM_COL = [1.0, 0.78, 0.5], FIRE_COL = [1.0, 0.5, 0.16], COOL_COL = [0.75, 0.85, 1.0];
+// gece parlaklık ayarları: 0 karanlık, 1 normal, 2 aydınlık
+const NIGHT = [
+  { moon: 0.45, moonAdd: 0.45, hemi: 0x2c3a66, hemiAdd: 0.0, exp: 0.25, env: 1.0, fog: 0x0b1322 },
+  { moon: 0.95, moonAdd: 0.6, hemi: 0x4a5f99, hemiAdd: 0.45, exp: 0.45, env: 1.9, fog: 0x15233a },
+  { moon: 1.4, moonAdd: 0.7, hemi: 0x6c82bd, hemiAdd: 0.85, exp: 0.6, env: 2.8, fog: 0x22344f },
+];
+function iconTexture(kind) {
+  const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
+  const x = c.getContext('2d');
+  if (kind === 'glow') {
+    const g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+    g.addColorStop(0.7, 'rgba(255,255,255,0.15)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = g; x.fillRect(0, 0, S, S);
+  } else {
+    x.beginPath(); x.arc(S / 2, S / 2, S * 0.44, 0, Math.PI * 2);
+    x.fillStyle = 'rgba(200,30,40,0.92)'; x.fill();
+    x.lineWidth = 7; x.strokeStyle = '#fff'; x.stroke();
+    x.beginPath();
+    x.moveTo(S * 0.56, S * 0.16); x.lineTo(S * 0.3, S * 0.56); x.lineTo(S * 0.48, S * 0.56);
+    x.lineTo(S * 0.42, S * 0.86); x.lineTo(S * 0.72, S * 0.44); x.lineTo(S * 0.53, S * 0.44); x.closePath();
+    x.fillStyle = '#ffd84a'; x.fill();
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
 const AIR_H = 2.8;
 
 const _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _s = new THREE.Vector3();
@@ -42,6 +70,8 @@ export class View {
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.5, 900);
     this.cam = { tx: 30, tz: 56, dist: 44, yaw: 0, pitch: 0.92, vx: 0, vz: 0 };
     this.time = 0;
+    const nm = parseInt(localStorage.getItem('ds_night') ?? '1', 10);
+    this.nightMode = nm >= 0 && nm <= 2 ? nm : 1;
     this.setupLights();
     if (quality === 'high') this.setupPost();
     this.bviews = new Map();
@@ -160,6 +190,9 @@ export class View {
     game.on('unitAdd', (u) => this.addUnit(u));
     game.on('unitDie', (u) => { this.removeUnit(u); const w = this.toWorld(u.x, u.y); this.fx.explosion(w.x, w.z, u.type === 'brute' || u.type === 'tank' ? 1.3 : 0.8); this.onBoom?.(w.x, w.z, 0.8); });
     game.on('treeRemoved', (x, y) => this.terrain.clearTile(x, y));
+    game.on('grid', () => { this.cablesDirty = true; });
+    this.setupPowerViz();
+    this.cablesDirty = true;
     game.on('explode', (x, y, s) => { const w = this.toWorld(x, y); this.fx.explosion(w.x, w.z, s); this.onBoom?.(w.x, w.z, s); });
     game.on('shot', (src, x, y, tx, ty, kind, target) => this.onShot(src, kind, target));
     for (const b of game.buildings.values()) this.addBuilding(b);
@@ -183,7 +216,7 @@ export class View {
     let p = map.get(key);
     if (!p) {
       if (ghost) p = new FramePool(this.scene, part.geo, this.ghostMat, { color: true, cast: false, receive: false, order: 4 });
-      else p = new Pool(this.scene, part.geo, part.mat, { color: part.inst, cast: !part.glow && this.quality !== 'low', receive: true, cap: type === 'belt' ? 64 : 8 });
+      else p = new Pool(this.scene, part.geo, part.mat, { color: part.inst, cast: !part.glow && this.quality !== 'low', receive: true, cap: type.startsWith('belt') || type.startsWith('wall') ? 64 : 8 });
       map.set(key, p);
     }
     return p;
@@ -196,7 +229,7 @@ export class View {
       const slot = pool.alloc();
       const s = { slot, part, pool };
       v.slots.push(s);
-      if (!['static', 'belt', 'window', 'status', 'furnace', 'beacon'].includes(part.anim)) v.dyn = true;
+      if (!STATIC_ANIMS.has(part.anim)) v.dyn = true;
       if (part.inst) {
         if (part.mat === materials().accent) { const c = FACTION_COL[b.faction] || FACTION_COL[1]; pool.color(slot, c.r, c.g, c.b); }
         else v.status.push(s);
@@ -241,44 +274,66 @@ export class View {
   }
   updateBuildings(dt) {
     const t = this.time;
-    const night = this.nightF;
-    const pr = this.game.power.ratio;
+    const g = this.game;
     const blink = Math.sin(t * 6) > 0;
+    const slowBlink = Math.sin(t * 3) > 0;
+    const night = this.nightF;
     for (const v of this.bviews.values()) {
       const b = v.b;
+      const def = BUILDINGS[b.type];
       if (v.grow < 1) {
         v.grow = Math.min(1, v.grow + dt * 1.6);
         this.placeStatic(v);
       }
-      if (b.working) v.ang += dt * (b.type === 'generator' ? 14 : 4) * Math.max(0.2, pr);
+      const pr = g.pr(b);
+      if (b.type === 'wind') v.ang += dt * (b.off ? 0 : 0.6 + g.wind * 3.2);
+      else if (b.working) v.ang += dt * (def.fuel ? 14 : b.type === 'enricher' ? 7 : 4) * Math.max(0.2, pr);
       if (v.dyn) {
         this.baseMatrix(v, _m);
         for (const s of v.slots) {
           const a = s.part.anim;
-          if (a === 'static' || a === 'belt' || a === 'window' || a === 'status' || a === 'furnace' || a === 'beacon') continue;
+          if (STATIC_ANIMS.has(a)) continue;
           if (a === 'yaw' || a === 'yawStatus') { this.yawMatrix(v, s.part, _m2); s.pool.set(s.slot, _m2); continue; }
-          let ang = 0;
+          let ang = 0, axis = _up;
           if (a === 'drill') ang = v.ang * 1.5;
-          else if (a === 'arm') ang = Math.sin(v.ang * 0.8) * 1.4;
+          else if (a === 'arm') ang = Math.sin(v.ang * 0.8 + (s.part.pivot ? s.part.pivot.x * 2 : 0)) * 1.4;
           else if (a === 'fan') ang = v.ang;
           else if (a === 'spin') ang = t * 0.8;
-          _q.setFromAxisAngle(_up, ang);
+          else if (a === 'spinFast') ang = v.ang * 4;
+          else if (a === 'nod') { ang = Math.sin(v.ang * 0.9) * 0.3; axis = _az; }
+          else if (a === 'rotorX') { ang = v.ang; axis = _ax; }
+          _q.setFromAxisAngle(axis, ang);
           _m2.compose(s.part.pivot || _v.set(0, 0, 0), _q, _s.set(1, 1, 1));
           s.pool.set(s.slot, _m2.premultiply(_m));
         }
       }
       // durum ışıkları
+      const unpowered = b.faction === 0 && def.power && b.net < 0;
       for (const s of v.status) {
         const a = s.part.anim;
         if (a === 'furnace') {
-          const k = b.working ? 1.6 + Math.sin(t * 13 + b.id) * 0.25 + Math.sin(t * 7.3) * 0.2 : 0.12;
+          const k = b.working ? (1.6 + Math.sin(t * 13 + b.id) * 0.25 + Math.sin(t * 7.3) * 0.2) * Math.max(0.3, pr) : 0.12;
           s.pool.color(s.slot, 3.0 * k, 1.05 * k, 0.25 * k);
+        } else if (a === 'arc') {
+          const k = b.working && pr > 0 ? (Math.random() < 0.85 ? 2.5 + Math.random() * 3 : 0.3) : 0.08;
+          s.pool.color(s.slot, 1.2 * k, 1.6 * k, 3.2 * k);
+        } else if (a === 'charge') {
+          const f = b.charge / (def.store || 1);
+          const k = b.working ? 1.3 + Math.sin(t * 8) * 0.5 : 1;
+          s.pool.color(s.slot, (1 - f) * 3 * k + 0.1, f * 2.8 * k + 0.1, 0.4 * f * k);
+        } else if (a === 'lamp') {
+          const k = b.working && pr > 0 ? 5 : 0.25;
+          s.pool.color(s.slot, k, k * 0.92, k * 0.75);
         } else if (a === 'beacon') {
           const on = Math.sin(t * 3 + b.id) > 0.6;
           s.pool.color(s.slot, on ? 6 : 0.3, on ? 0.4 : 0.05, on ? 0.3 : 0.05);
         } else if (b.faction !== 0) {
           s.pool.color(s.slot, 3.5, 0.3, 0.2);
-        } else if (b.type.startsWith('turret')) {
+        } else if (b.off) {
+          s.pool.color(s.slot, 0.15, 0.15, 0.18);
+        } else if (unpowered) {
+          s.pool.color(s.slot, slowBlink ? 3.2 : 0.2, slowBlink ? 0.4 : 0.05, slowBlink ? 2.4 : 0.1);
+        } else if (def.range) {
           if (b.noAmmo) s.pool.color(s.slot, blink ? 4 : 0.2, blink ? 1.8 : 0.1, 0);
           else if (b.target) s.pool.color(s.slot, 4, 0.3, 0.2);
           else s.pool.color(s.slot, 0.3, 2.6, 0.5);
@@ -290,12 +345,15 @@ export class View {
           else s.pool.color(s.slot, 2.8, 1.6, 0.1);
         }
       }
-      // baca dumanı
-      if (b.working && CHIMNEY[b.type] && Math.random() < dt * (b.type === 'generator' ? 6 : 3.5)) {
-        for (const [lx, ly, lz] of CHIMNEY[b.type]) {
-          const c = Math.cos(-b.dir * Math.PI / 2), sn = Math.sin(-b.dir * Math.PI / 2);
+      // baca dumanı / alev
+      const ch = CHIMNEY[b.type];
+      if (ch && b.working && Math.random() < dt * (def.fuel ? 6 : 3.5)) {
+        const c = Math.cos(-b.dir * Math.PI / 2), sn = Math.sin(-b.dir * Math.PI / 2);
+        for (const [lx, ly, lz] of ch) {
           const wx = v.cx + lx * c + lz * sn, wz = v.cz - lx * sn + lz * c;
-          this.fx.chimney(wx, ly, wz, b.type === 'generator');
+          if (b.type === 'refinery') this.fx.fire.emit(wx, ly + 0.1, wz, (Math.random() - 0.5) * 0.3, 1.4, (Math.random() - 0.5) * 0.3, 0.5, 0.45, 0.9, 3.2, 1.5, 0.35, 1, 0.8);
+          if (b.type === 'reactor') this.fx.steam(wx, ly, wz);
+          else this.fx.chimney(wx, ly, wz, def.fuel === 'coal' || def.fuel === 'fuel');
         }
       }
     }
@@ -389,13 +447,13 @@ export class View {
     if (far) return;
     const b = this.targetWorld(target);
     const k = kind === 'laser' && src.faction !== 0 ? 'elaser' : kind;
-    if (kind !== 'shell') {
+    if (kind !== 'shell' && kind !== 'rocket') {
       this.fx.tracer(a, b, k);
       if (kind === 'bullet') this.fx.fire.emit(b.x, b.y, b.z, 0, 0.5, 0, 0.08, 0.3, 2, 3, 2.2, 1, 0.8);
       else this.fx.fire.emit(b.x, b.y, b.z, 0, 0.3, 0, 0.15, 0.6, 2, k === 'elaser' ? 3 : 0.5, k === 'elaser' ? 0.4 : 2.5, k === 'elaser' ? 0.3 : 3, 1);
     }
-    this.fx.muzzle(a, kind);
-    if (Math.random() < (kind === 'bullet' ? 0.25 : 1)) this.fx.flash(a.x, a.y + 0.3, a.z, kind === 'shell' ? 25 : 8, kind.includes('laser') ? 0x60f0ff : 0xffb050, 0.07);
+    this.fx.muzzle(a, kind === 'rocket' ? 'shell' : kind);
+    if (Math.random() < (kind === 'bullet' ? 0.25 : 1)) this.fx.flash(a.x, a.y + 0.3, a.z, kind === 'shell' || kind === 'rocket' ? 25 : 8, kind.includes('laser') ? 0x60f0ff : 0xffb050, 0.07);
   }
 
   // --------- konveyör eşyaları ---------
@@ -403,7 +461,7 @@ export class View {
     for (const p of Object.values(this.items)) p.begin();
     for (const v of this.bviews.values()) {
       const b = v.b;
-      if (b.type !== 'belt' || !b.items.length) continue;
+      if (!b.items || !b.items.length) continue;
       const g = v.grow < 1 ? v.grow : 1;
       for (let k = 0; k < b.items.length; k++) {
         const it = b.items[k];
@@ -481,7 +539,7 @@ export class View {
     for (const p of this.ghostPools.values()) p.end();
     this.arrows.end();
   }
-  showsDir(type) { return ['belt', 'miner', 'smelter', 'assembler', 'foundry', 'factory'].includes(type); }
+  showsDir(type) { const d = BUILDINGS[type]; return !!(d.mine || d.machine || d.speed || type === 'factory'); }
   pushArrow(cx, cz, dir, size, ok) {
     _q.setFromAxisAngle(_up, -dir * Math.PI / 2);
     const off = size * TILE * 0.5 + 0.5;
@@ -512,6 +570,132 @@ export class View {
     if (range) { this.rangeRing.position.set(x, 0.07, z); this.rangeRing.scale.setScalar(range * TILE); }
   }
 
+  // --------- elektrik görselleri ---------
+  setupPowerViz() {
+    const cg = new THREE.CylinderGeometry(0.035, 0.035, 1, 5, 1, true);
+    cg.rotateZ(-Math.PI / 2); cg.translate(0.5, 0, 0);
+    this.cables = new FramePool(this.scene, cg, new THREE.MeshStandardMaterial({ color: 0x18191b, roughness: 0.55, metalness: 0.5 }), { cast: false, receive: false, cap: 256 });
+    const rg = new THREE.RingGeometry(0.965, 1, 72).rotateX(-Math.PI / 2);
+    this.coverRings = new FramePool(this.scene, rg, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, depthWrite: false, toneMapped: false }), { color: true, cast: false, receive: false, order: 3 });
+    const dg = new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2);
+    this.coverDiscs = new FramePool(this.scene, dg, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.06, depthWrite: false, toneMapped: false }), { color: true, cast: false, receive: false, order: 3 });
+    this.noPower = new FramePool(this.scene, new THREE.PlaneGeometry(1.15, 1.15),
+      new THREE.MeshBasicMaterial({ map: iconTexture('bolt'), transparent: true, depthWrite: false, depthTest: false, toneMapped: false }), { cast: false, receive: false, order: 22 });
+    this.lightPool = new FramePool(this.scene, new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ map: iconTexture('glow'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }), { color: true, cast: false, receive: false, order: 2 });
+    // gerçek ışık: kameraya en yakın projektörler
+    const nl = this.quality === 'high' ? 4 : this.quality === 'medium' ? 2 : 0;
+    this.lampLights = [];
+    for (let i = 0; i < nl; i++) {
+      const l = new THREE.PointLight(0xffe2b0, 0, 22, 1.6);
+      this.scene.add(l); this.lampLights.push(l);
+    }
+  }
+  attachPt(b, out) {
+    const s = b.size / 2;
+    return out.set((b.x + s) * TILE, ATTACH[b.type] ?? 1.7, (b.y + s) * TILE);
+  }
+  updatePowerViz() {
+    const g = this.game;
+    if (this.cablesDirty) {
+      this.cablesDirty = false;
+      this.cables.begin();
+      const A = new THREE.Vector3(), B = new THREE.Vector3(), P0 = new THREE.Vector3(), P1 = new THREE.Vector3(), d = new THREE.Vector3();
+      for (const [a, b] of g.pnet.links) {
+        this.attachPt(a, A); this.attachPt(b, B);
+        const len = A.distanceTo(B), sag = Math.min(1.4, len * 0.05), N = 6;
+        for (let i = 0; i < N; i++) {
+          const t0 = i / N, t1 = (i + 1) / N;
+          P0.lerpVectors(A, B, t0); P0.y -= sag * 4 * t0 * (1 - t0);
+          P1.lerpVectors(A, B, t1); P1.y -= sag * 4 * t1 * (1 - t1);
+          d.subVectors(P1, P0); const l = d.length(); d.normalize();
+          _q.setFromUnitVectors(_ax, d);
+          _m.compose(P0, _q, _s.set(l, 1, 1));
+          this.cables.push(_m);
+        }
+      }
+      this.cables.end();
+    }
+    // kapsama halkaları
+    this.coverRings.begin(); this.coverDiscs.begin();
+    const tt = this.toolType ? BUILDINGS[this.toolType] : null;
+    const sb = this.selected?.b;
+    const showAll = (tt && (tt.node || tt.power)) || (sb && sb.faction === 0 && (BUILDINGS[sb.type].node || BUILDINGS[sb.type].power));
+    if (showAll) {
+      for (const n of g.pnet.nets) {
+        const bad = n.demand > 0 && n.ratio < 1;
+        for (const b of n.nodes) {
+          const r = (BUILDINGS[b.type].node.cover + (b.size - 1) / 2) * TILE;
+          const [cx, cy] = g.center(b);
+          _m.compose(_v.set(cx * TILE, 0.1, cy * TILE), _q.identity(), _s.set(r, 1, r));
+          const hi = sb === b ? 1.6 : 1;
+          if (bad) { this.coverRings.push(_m, 2 * hi, 0.6 * hi, 0.3 * hi); this.coverDiscs.push(_m, 1, 0.3, 0.1); }
+          else { this.coverRings.push(_m, 0.35 * hi, 1.6 * hi, 2.2 * hi); this.coverDiscs.push(_m, 0.2, 0.8, 1.1); }
+        }
+      }
+      for (const gh of this.ghosts) {
+        const d = BUILDINGS[gh.type];
+        if (!d.node) continue;
+        const r = (d.node.cover + (d.size - 1) / 2) * TILE, cs = d.size / 2;
+        _m.compose(_v.set((gh.x + cs) * TILE, 0.11, (gh.y + cs) * TILE), _q.identity(), _s.set(r, 1, r));
+        this.coverRings.push(_m, gh.ok ? 0.4 : 2, gh.ok ? 2.2 : 0.3, gh.ok ? 0.6 : 0.2);
+        // bağlantı menzili (kesik çizgi yerine soluk halka)
+        const L = d.node.link * TILE;
+        _m.compose(_v.set((gh.x + cs) * TILE, 0.11, (gh.y + cs) * TILE), _q.identity(), _s.set(L, 1, L));
+        this.coverRings.push(_m, 0.6, 0.6, 0.6);
+      }
+    }
+    this.coverRings.end(); this.coverDiscs.end();
+    // elektriksiz yapı simgeleri
+    this.noPower.begin();
+    const pulse = 0.85 + Math.sin(this.time * 5) * 0.15;
+    for (const v of this.bviews.values()) {
+      const b = v.b;
+      if (b.faction !== 0 || b.net >= 0 || b.off) continue;
+      const d = BUILDINGS[b.type];
+      if (!d.power || d.node) continue;
+      _m.compose(_v.set(v.cx, 3.4 + b.size * 0.5, v.cz), this.camera.quaternion, _s.set(pulse, pulse, pulse));
+      this.noPower.push(_m);
+    }
+    this.noPower.end();
+  }
+  updateLights() {
+    const nf = this.nightF;
+    const lp = this.lightPool;
+    lp.begin();
+    const lamps = [];
+    if (nf > 0.03) {
+      const g = this.game;
+      for (const v of this.bviews.values()) {
+        const b = v.b, d = BUILDINGS[b.type];
+        let r, c, k;
+        if (b.type === 'lamp') {
+          if (!b.working || g.pr(b) <= 0) continue;
+          r = 7 * TILE; c = LAMP_COL; k = 0.42; lamps.push(v);
+        } else if (b.type === 'hq') { r = 10; c = WARM_COL; k = 0.4; }
+        else if (b.type === 'factory' || b.type === 'reactor' || b.type === 'adv_assembler' || b.type === 'refinery') { r = 6.5; c = WARM_COL; k = 0.3; }
+        else if (b.working && d.machine && CHIMNEY[b.type]) { r = 3.4; c = FIRE_COL; k = 0.45; }
+        else if (d.range && b.faction === 0) { r = 3; c = COOL_COL; k = 0.18; }
+        else continue;
+        const I = k * nf;
+        _m.compose(_v.set(v.cx, 0.09, v.cz), _q.identity(), _s.set(r, 1, r));
+        lp.push(_m, c[0] * I, c[1] * I, c[2] * I);
+      }
+    }
+    lp.end();
+    // gerçek nokta ışıkları
+    if (this.lampLights.length) {
+      const c = this.cam;
+      lamps.sort((a, b) => ((a.cx - c.tx) ** 2 + (a.cz - c.tz) ** 2) - ((b.cx - c.tx) ** 2 + (b.cz - c.tz) ** 2));
+      this.lampLights.forEach((l, i) => {
+        const v = lamps[i];
+        if (!v) { l.intensity = 0; return; }
+        l.position.set(v.cx, 3.6, v.cz);
+        l.intensity = 60 * nf;
+      });
+    }
+  }
+
   // --------- gün/gece ---------
   updateSky(dt) {
     const g = this.game;
@@ -526,30 +710,32 @@ export class View {
     const night = clamp(-s * 4, 0, 1);
     this.nightF = clamp(1 - s * 3.5, 0, 1);
     const tgt = new THREE.Vector3(this.cam.tx, 0, this.cam.tz);
+    const N = NIGHT[this.nightMode] || NIGHT[1];
+    const dark = 1 - day;
     // güneş ya da ay
     let ldir;
     if (s > -0.02) {
       ldir = sunDir.clone(); if (ldir.y < 0.08) ldir.y = 0.08;
       const warm = new THREE.Color(0xff9a50).lerp(new THREE.Color(0xfff2e2), clamp(s * 2.2, 0, 1));
       this.sun.color.copy(warm);
-      this.sun.intensity = 0.25 + 3.2 * day;
+      this.sun.intensity = 0.25 + 3.2 * day + N.moon * dark;
     } else {
       ldir = new THREE.Vector3(-0.35, 0.85, 0.4).normalize();
-      this.sun.color.set(0x8aa4ff);
-      this.sun.intensity = 0.7 * night + 0.35;
+      this.sun.color.set(0x9fb4ff);
+      this.sun.intensity = N.moon + N.moonAdd * night;
     }
     this.sun.position.copy(tgt).addScaledVector(ldir, 120);
     this.sun.target.position.copy(tgt);
     const sc = this.sun.shadow.camera, half = clamp(this.cam.dist * 1.05, 26, 80);
     if (sc.right !== half) { sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half; sc.updateProjectionMatrix(); }
-    this.hemi.color.set(0x3a4c80).lerp(new THREE.Color(0xbcd6ff), day);
+    this.hemi.color.set(N.hemi).lerp(new THREE.Color(0xbcd6ff), day);
     this.hemi.groundColor.set(0x1c1a16).lerp(new THREE.Color(0x4a3f2a), day);
-    this.hemi.intensity = 0.7 - 0.0 * day;
-    const fog = new THREE.Color(0x0b1322).lerp(new THREE.Color(0xd9a27a), clamp(1 - Math.abs(s - 0.08) * 6, 0, 1) * (s > -0.1 ? 1 : 0));
+    this.hemi.intensity = 0.7 + N.hemiAdd * dark;
+    const fog = new THREE.Color(N.fog).lerp(new THREE.Color(0xd9a27a), clamp(1 - Math.abs(s - 0.08) * 6, 0, 1) * (s > -0.1 ? 1 : 0));
     fog.lerp(new THREE.Color(0xb9c7d3), clamp((s - 0.15) * 3, 0, 1));
     this.scene.fog.color.copy(fog);
     this.scene.environmentIntensity = 1;
-    this.renderer.toneMappingExposure = 0.85 + night * 0.35;
+    this.renderer.toneMappingExposure = 0.85 + Math.max(night, dark * 0.6) * N.exp;
     this.stars.material.opacity = night * 0.9;
     this.stars.position.copy(this.camera.position);
     this.sky.position.copy(this.camera.position);
@@ -560,8 +746,8 @@ export class View {
       this.envTimer = this.quality === 'low' ? 30 : 3;
       this.lastEnvSun = s;
       const u = this.envU, dusk = clamp(1 - Math.abs(s - 0.06) * 5, 0, 1);
-      u.top.value.setRGB(0.03, 0.045, 0.1).lerp(new THREE.Color(0.16, 0.32, 0.7), day);
-      u.hor.value.setRGB(0.05, 0.065, 0.11).lerp(new THREE.Color(0.62, 0.66, 0.7), day).lerp(new THREE.Color(0.85, 0.45, 0.25), dusk * 0.6);
+      u.top.value.setRGB(0.03 * N.env, 0.045 * N.env, 0.1 * N.env).lerp(new THREE.Color(0.16, 0.32, 0.7), day);
+      u.hor.value.setRGB(0.05 * N.env, 0.065 * N.env, 0.11 * N.env).lerp(new THREE.Color(0.62, 0.66, 0.7), day).lerp(new THREE.Color(0.85, 0.45, 0.25), dusk * 0.6);
       u.bot.value.setRGB(0.01, 0.01, 0.012).lerp(new THREE.Color(0.2, 0.18, 0.14), day);
       u.sunDir.value.copy(s > -0.02 ? sunDir : new THREE.Vector3(-0.35, 0.85, 0.4).normalize());
       u.sunCol.value.copy(this.sun.color).multiplyScalar(s > -0.02 ? 1.2 * day + 0.2 : 0.05);
@@ -619,6 +805,10 @@ export class View {
       this.terrain.update(this.time);
       this.beltPhase = ((this.beltPhase || 0) + dt * 1.8 * this.game.speed) % 1;
       materials().belt.map.offset.x = -this.beltPhase;
+      this.beltPhase2 = ((this.beltPhase2 || 0) + dt * 3.6 * this.game.speed) % 1;
+      materials().beltFast.map.offset.x = -this.beltPhase2;
+      this.updatePowerViz();
+      this.updateLights();
       this.updateBuildings(dt);
       this.updateUnits(dt);
       this.updateItems();
@@ -638,3 +828,6 @@ function easeOutBack(x) {
   return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
 }
 export { FACTION_COL, RECIPES };
+
+// gece parlaklığını değiştir (ortam haritasını hemen yenile)
+View.prototype.setNightMode = function (m) { this.nightMode = m; this.lastEnvSun = -9; this.envTimer = 0; };

@@ -21,7 +21,7 @@ export function renderThumbs() {
   scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x403528, 0.6));
   const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
   const accentCol = new THREE.Color(0x3a74c4);
-  const glowCol = { furnace: new THREE.Color(3, 1.1, 0.25), status: new THREE.Color(0.3, 3, 0.6), yawStatus: new THREE.Color(0.3, 3, 0.6), beacon: new THREE.Color(5, 0.3, 0.3) };
+  const glowCol = { furnace: new THREE.Color(3, 1.1, 0.25), status: new THREE.Color(0.3, 3, 0.6), yawStatus: new THREE.Color(0.3, 3, 0.6), beacon: new THREE.Color(5, 0.3, 0.3), arc: new THREE.Color(1.5, 2, 4), charge: new THREE.Color(0.3, 3, 0.6), lamp: new THREE.Color(4, 3.6, 2.8) };
   const M = materials();
   const shoot = (group, radius, center) => {
     const d = radius * 2.75;

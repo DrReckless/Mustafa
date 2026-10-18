@@ -26,6 +26,7 @@ export class Input {
     this.tool = t;
     this.line = null;
     this.view.ghosts = [];
+    this.view.toolType = t?.kind === 'build' ? t.type : null;
     this.app.ui.setToolUI(t);
     if (t) this.app.select(null);
   }
@@ -236,7 +237,9 @@ export class Input {
         for (const k in cost) if ((stock[k] || 0) < cost[k]) ok = false;
         if (ok) for (const k in cost) stock[k] -= cost[k];
       }
-      return { type: t, x, y, dir: t === 'wall' ? 0 : d, ok };
+      const ex = this.game.at(x, y);
+      if (ex && ex.items && BUILDINGS[t].speed && ex.faction === 0) ok = ex.type === t || this.game.canAfford(BUILDINGS[t].cost);
+      return { type: t, x, y, dir: BUILDINGS[t].speed ? d : 0, ok };
     });
   }
   commitLine() {
@@ -244,9 +247,14 @@ export class Input {
     let n = 0, fail = 0;
     for (const [x, y, d] of this.linePath()) {
       const ex = this.game.at(x, y);
-      // var olan konveyörün yönünü güncelle
-      if (ex && ex.type === 'belt' && t === 'belt' && ex.dir !== d) { ex.dir = d; this.game.emit('update', ex); n++; continue; }
-      if (this.game.placeBuilding(t, x, y, t === 'wall' ? 0 : d)) n++; else if (!ex) fail++;
+      const isBelt = !!BUILDINGS[t].speed;
+      // var olan konveyör: yönünü güncelle ya da türünü yükselt
+      if (ex && ex.items && isBelt && ex.faction === 0) {
+        if (ex.type === t) { if (ex.dir !== d) { ex.dir = d; this.game.emit('update', ex); n++; } }
+        else if (this.game.replaceBelt(ex, t, d)) n++; else fail++;
+        continue;
+      }
+      if (this.game.placeBuilding(t, x, y, isBelt ? d : 0)) n++; else if (!ex) fail++;
     }
     this.line = null;
     this.view.ghosts = [];

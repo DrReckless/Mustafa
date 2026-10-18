@@ -32,7 +32,18 @@ export function materials() {
     glowWindow: new THREE.MeshBasicMaterial({ color: 0xffffff, map: T.windows, toneMapped: false }),
     glowLaser: new THREE.MeshBasicMaterial({ color: 0x8ff6ff, toneMapped: false }),
     blade: std({ color: 0x2a2c30, metalness: 0.6, roughness: 0.5, side: THREE.DoubleSide }),
+    white: std({ color: 0xe4e6e8, map: T.metal, normalMap: T.metalN, metalness: 0.2, roughness: 0.45 }),
+    blueSteel: std({ color: 0x2f62a8, map: T.metal, normalMap: T.metalN, metalness: 0.45, roughness: 0.5 }),
+    patina: std({ color: 0x5f9c86, map: T.metal, normalMap: T.metalN, metalness: 0.4, roughness: 0.65 }),
+    graphite: std({ color: 0x232325, metalness: 0.3, roughness: 0.75 }),
+    insulator: std({ color: 0x8a5a3a, metalness: 0.1, roughness: 0.3 }),
+    ceramic: std({ color: 0xcfd4d6, metalness: 0.05, roughness: 0.35 }),
   };
+  {
+    const bt = T.belt.clone(); bt.needsUpdate = true;
+    M.beltFast = std({ color: 0xbcd8ff, map: bt, roughness: 0.75, metalness: 0.05 });
+  }
+  M.concreteDS = M.concrete.clone(); M.concreteDS.side = THREE.DoubleSide;
   M.glowFurnace.userData.instColor = true;
   M.glowLight.userData.instColor = true;
   M.accent.userData.instColor = true;
@@ -83,13 +94,14 @@ class Builder {
 }
 
 // ---------------- bina modelleri ----------------
-function mBelt(m) {
+function mBelt(m, fast = false) {
   const b = new Builder();
-  b.add(box(2.0, 0.06, 1.42), m.belt, { y: 0.4 }, 'belt');
+  b.add(box(2.0, 0.06, 1.42), fast ? m.beltFast : m.belt, { y: 0.4 }, fast ? 'beltFast' : 'belt');
   for (const z of [-0.78, 0.78]) {
-    b.add(rbox(2.0, 0.2, 0.12, 0.03), m.darkSteel, { y: 0.36, z });
-    b.add(box(2.0, 0.04, 0.16), m.hazard, { y: 0.48, z });
+    b.add(rbox(2.0, 0.2, 0.12, 0.03), fast ? m.blueSteel : m.darkSteel, { y: 0.36, z });
+    b.add(box(2.0, 0.04, 0.16), fast ? m.steel : m.hazard, { y: 0.48, z });
   }
+  if (fast) for (const z of [-0.78, 0.78]) for (const x of [-0.6, 0, 0.6]) b.add(box(0.12, 0.03, 0.17), m.blueSteel, { x, y: 0.505, z });
   for (const x of [-0.92, 0.92]) b.add(cyl(0.08, 0.08, 1.5, 10), m.steel, { x, y: 0.36, rx: Math.PI / 2 });
   for (const x of [-0.75, 0.75]) for (const z of [-0.74, 0.74]) b.add(box(0.1, 0.3, 0.1), m.steel, { x, y: 0.15, z });
   b.add(box(1.6, 0.05, 0.05), m.steel, { y: 0.12, z: 0.74 });
@@ -118,23 +130,6 @@ function mMiner(m) {
   b.add(cyl(0.12, 0.12, 2.0, 8), m.steel, { y: 1.0 }, 'drill', [0, 0, 0]);
   b.add(cyl(0.32, 0.05, 0.5, 6), m.darkSteel, { y: 0.25 }, 'drill', [0, 0, 0]);
   for (let i = 0; i < 6; i++) b.add(box(0.5, 0.05, 0.12), m.steel, { y: 0.55 + i * 0.22, ry: i * 1.05 }, 'drill', [0, 0, 0]);
-  return b.build();
-}
-
-function mSmelter(m) {
-  const b = new Builder();
-  b.add(rbox(1.9, 0.2, 1.9, 0.05), m.concreteDark, { y: 0.1 });
-  b.add(rbox(1.35, 1.3, 1.5, 0.1), m.brick, { x: -0.12, y: 0.85 });
-  b.add(rbox(1.15, 0.35, 1.25, 0.06), m.darkSteel, { x: -0.15, y: 1.65 });
-  b.add(cyl(0.2, 0.27, 2.4, 14), m.darkSteel, { x: -0.45, y: 2.7, z: -0.38 });
-  for (const y of [2.0, 2.8, 3.6]) b.add(cyl(0.25, 0.25, 0.08, 14), m.rust, { x: -0.45, y, z: -0.38 });
-  b.add(rbox(0.16, 0.75, 1.0, 0.03), m.darkSteel, { x: 0.58, y: 0.78 });
-  b.add(box(0.05, 0.45, 0.72), m.glowFurnace, { x: 0.67, y: 0.75 }, 'furnace');
-  b.add(rbox(0.5, 0.08, 0.7, 0.02), m.steel, { x: 0.82, y: 0.42 });
-  b.add(box(0.7, 0.55, 0.9), m.steel, { x: -0.8, y: 1.3, rz: 0.35 });
-  b.add(cyl(0.06, 0.06, 1.3, 8), m.copper, { x: 0.25, y: 1.0, z: 0.78, rx: Math.PI / 2, rz: Math.PI / 2 });
-  b.add(cyl(0.06, 0.06, 1.1, 8), m.copper, { x: 0.55, y: 0.45, z: 0.78 });
-  b.add(box(0.1, 0.1, 0.1), m.glowLight, { x: 0.6, y: 1.45, z: -0.6 }, 'status');
   return b.build();
 }
 
@@ -332,6 +327,457 @@ function mHQ(m) {
   return b.build();
 }
 
+// iki nokta arasında ince kiriş (önceden dönüştürülmüş geometri)
+const _Y = new THREE.Vector3(0, 1, 0);
+function strut(b, mat, a, c, t = 0.06, anim = 'static', pivot = null) {
+  const A = new THREE.Vector3(...a), C = new THREE.Vector3(...c);
+  const d = C.clone().sub(A); const len = d.length();
+  const g = new THREE.BoxGeometry(t, len, t);
+  const q = new THREE.Quaternion().setFromUnitVectors(_Y, d.normalize());
+  g.applyMatrix4(new THREE.Matrix4().compose(A.add(C).multiplyScalar(0.5), q, new THREE.Vector3(1, 1, 1)));
+  b.add(g, mat, {}, anim, pivot);
+}
+function pad(b, m, s = 1.9, h = 0.2, mat = m.concreteDark) { b.add(rbox(s, h, s, 0.05), mat, { y: h / 2 }); }
+
+function mMinerMk2(m) {
+  const b = new Builder();
+  pad(b, m, 1.95, 0.3, m.concrete);
+  for (const x of [-0.7, 0.7]) for (const z of [-0.7, 0.7]) b.add(rbox(0.22, 2.0, 0.22, 0.04), m.darkSteel, { x, y: 1.3, z });
+  for (const z of [-0.7, 0.7]) strut(b, m.steel, [-0.7, 0.4, z], [0.7, 2.1, z], 0.08);
+  for (const x of [-0.7, 0.7]) strut(b, m.steel, [x, 0.4, -0.7], [x, 2.1, 0.7], 0.08);
+  b.add(rbox(1.6, 0.14, 1.6, 0.03), m.hazard, { y: 2.3 });
+  b.add(rbox(1.5, 0.8, 1.5, 0.1), m.rust, { y: 2.75 });
+  b.add(rbox(1.52, 0.1, 1.52, 0.03), m.yellow, { y: 3.0 });
+  b.add(rbox(0.7, 0.5, 0.7, 0.05), m.darkSteel, { x: -0.3, y: 3.4, z: -0.2 });
+  for (const z of [-0.15, 0.15]) b.add(cyl(0.06, 0.06, 0.8, 8), m.darkSteel, { x: -0.55, y: 3.8, z: 0.4 + z });
+  b.add(cyl(0.22, 0.22, 0.35, 12), m.copper, { x: 0.35, y: 3.3, z: 0.35 });
+  // oluk
+  b.add(rbox(0.8, 0.08, 0.6, 0.02), m.yellow, { x: 0.72, y: 0.85, rz: -0.45 });
+  for (const z of [-0.3, 0.3]) b.add(box(0.8, 0.28, 0.04), m.yellow, { x: 0.72, y: 0.95, z, rz: -0.45 });
+  b.add(box(0.12, 0.12, 0.12), m.glowLight, { x: 0.76, y: 2.8, z: 0.5 }, 'status');
+  const P = [0, 0, 0];
+  b.add(cyl(0.16, 0.16, 2.3, 10), m.steel, { y: 1.15 }, 'drill', P);
+  b.add(cyl(0.42, 0.06, 0.6, 8), m.rust, { y: 0.3 }, 'drill', P);
+  for (let i = 0; i < 7; i++) b.add(box(0.62, 0.06, 0.14), m.darkSteel, { y: 0.6 + i * 0.22, ry: i * 0.9 }, 'drill', P);
+  return b.build();
+}
+
+function mPumpjack(m) {
+  const b = new Builder();
+  pad(b, m, 1.9, 0.18);
+  b.add(rbox(1.8, 0.12, 0.5, 0.03), m.darkSteel, { y: 0.24 });
+  // samson direği
+  for (const z of [-0.3, 0.3]) {
+    strut(b, m.yellow, [-0.6, 0.3, z], [0, 1.95, z * 0.4], 0.1);
+    strut(b, m.yellow, [0.45, 0.3, z], [0, 1.95, z * 0.4], 0.1);
+  }
+  b.add(cyl(0.08, 0.08, 0.4, 10), m.darkSteel, { y: 1.98, rx: Math.PI / 2 });
+  // motor ve dişli kutusu
+  b.add(rbox(0.5, 0.4, 0.4, 0.05), m.gray, { x: -0.65, y: 0.5 });
+  b.add(cyl(0.18, 0.18, 0.3, 12), m.darkSteel, { x: -0.65, y: 0.85, rx: Math.PI / 2 });
+  // kuyu başı
+  b.add(cyl(0.12, 0.15, 0.35, 10), m.darkSteel, { x: 0.85, y: 0.4 });
+  b.add(cyl(0.18, 0.18, 0.08, 10), m.rust, { x: 0.85, y: 0.58 });
+  b.add(cyl(0.05, 0.05, 0.6, 8), m.copper, { x: 0.6, y: 0.4, rz: Math.PI / 2 });
+  b.add(box(0.1, 0.1, 0.1), m.glowLight, { x: -0.4, y: 0.6, z: 0.22 }, 'status');
+  // sallanan kiriş (pivot: dayanak noktası)
+  const P = [0, 2.0, 0];
+  b.add(rbox(2.2, 0.16, 0.16, 0.03), m.yellow, { x: 0.05 }, 'nod', P);
+  b.add(rbox(0.28, 0.75, 0.24, 0.06), m.darkSteel, { x: 1.18, y: -0.18 }, 'nod', P);
+  b.add(rbox(0.55, 0.42, 0.36, 0.06), m.darkSteel, { x: -1.05, y: -0.15 }, 'nod', P);
+  b.add(cyl(0.025, 0.025, 1.3, 6), m.steel, { x: 0.85, y: -1.0 }, 'nod', P);
+  return b.build();
+}
+
+function mSmelterIron(m) {
+  const parts = new Builder();
+  // eski eritme fırını + şarj köprüsü
+  const b = parts;
+  b.add(rbox(1.9, 0.2, 1.9, 0.05), m.concreteDark, { y: 0.1 });
+  b.add(rbox(1.35, 1.3, 1.5, 0.1), m.brick, { x: -0.12, y: 0.85 });
+  b.add(rbox(1.15, 0.35, 1.25, 0.06), m.darkSteel, { x: -0.15, y: 1.65 });
+  b.add(cyl(0.2, 0.27, 2.4, 14), m.darkSteel, { x: -0.45, y: 2.7, z: -0.38 });
+  for (const y of [2.0, 2.8, 3.6]) b.add(cyl(0.25, 0.25, 0.08, 14), m.rust, { x: -0.45, y, z: -0.38 });
+  b.add(rbox(0.16, 0.75, 1.0, 0.03), m.darkSteel, { x: 0.58, y: 0.78 });
+  b.add(box(0.05, 0.45, 0.72), m.glowFurnace, { x: 0.67, y: 0.75 }, 'furnace');
+  b.add(rbox(0.5, 0.08, 0.7, 0.02), m.steel, { x: 0.82, y: 0.42 });
+  b.add(cyl(0.3, 0.38, 0.6, 14), m.rust, { x: 0.05, y: 2.1, z: 0.3 });
+  strut(b, m.steel, [-0.9, 0.2, 0.75], [0.0, 2.4, 0.4], 0.14);
+  strut(b, m.steel, [-0.9, 0.2, 0.55], [-0.9, 1.3, 0.55], 0.08);
+  b.add(cyl(0.06, 0.06, 1.3, 8), m.copper, { x: 0.25, y: 1.0, z: 0.78, rx: Math.PI / 2, rz: Math.PI / 2 });
+  b.add(box(0.1, 0.1, 0.1), m.glowLight, { x: 0.6, y: 1.45, z: -0.6 }, 'status');
+  return b.build();
+}
+
+function mSmelterCopper(m) {
+  const b = new Builder();
+  pad(b, m);
+  b.add(cyl(0.8, 0.88, 1.0, 20), m.brick, { x: -0.1, y: 0.7 });
+  b.add(cyl(0.84, 0.84, 0.1, 20), m.patina, { x: -0.1, y: 1.22 });
+  b.add(cyl(0.22, 0.84, 0.55, 20), m.patina, { x: -0.1, y: 1.55 });
+  b.add(cyl(0.16, 0.2, 1.1, 12), m.patina, { x: -0.4, y: 1.9, z: 0.4 });
+  b.add(cyl(0.2, 0.2, 0.08, 12), m.copper, { x: -0.4, y: 2.45, z: 0.4 });
+  b.add(rbox(0.3, 0.6, 0.7, 0.04), m.darkSteel, { x: 0.68, y: 0.65 });
+  b.add(box(0.05, 0.35, 0.5), m.glowFurnace, { x: 0.84, y: 0.65 }, 'furnace');
+  b.add(rbox(0.6, 0.06, 0.18, 0.02), m.copper, { x: 0.8, y: 0.35, rz: -0.25 });
+  for (const a of [0.6, 2.2, 3.8]) b.add(cyl(0.03, 0.03, 1.0, 6), m.darkSteel, { x: -0.1 + Math.cos(a) * 0.89, y: 0.7, z: Math.sin(a) * 0.89 });
+  b.add(box(0.1, 0.1, 0.1), m.glowLight, { x: 0.55, y: 1.1, z: -0.55 }, 'status');
+  return b.build();
+}
+
+function mKiln(m) {
+  const b = new Builder();
+  pad(b, m);
+  b.add(cyl(0.9, 0.92, 0.35, 20), m.concrete, { y: 0.37 });
+  b.add(new THREE.SphereGeometry(0.88, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), m.brick, { y: 0.54 });
+  for (let i = 0; i < 3; i++) b.add(new THREE.TorusGeometry(0.89 - i * 0.12, 0.025, 6, 24), m.rust, { y: 0.55 + i * 0.35 + (i ? 0.03 : 0), rx: Math.PI / 2, sx: 1 - i * 0.25, sy: 1 - i * 0.25 });
+  // ağız
+  b.add(rbox(0.3, 0.7, 0.7, 0.06), m.brick, { x: 0.78, y: 0.65 });
+  b.add(new THREE.TorusGeometry(0.24, 0.05, 6, 12, Math.PI), m.rust, { x: 0.94, y: 0.62, ry: Math.PI / 2 });
+  b.add(box(0.04, 0.4, 0.44), m.glowFurnace, { x: 0.94, y: 0.6 }, 'furnace');
+  b.add(cyl(0.14, 0.18, 2.1, 12), m.brick, { x: -0.55, y: 1.55, z: -0.55 });
+  b.add(cyl(0.18, 0.18, 0.08, 12), m.darkSteel, { x: -0.55, y: 2.6, z: -0.55 });
+  b.add(box(0.1, 0.1, 0.1), m.glowLight, { x: 0.62, y: 1.05, z: 0.45 }, 'status');
+  return b.build();
+}
+
+function mArcFurnace(m) {
+  const b = new Builder();
+  pad(b, m);
+  b.add(cyl(0.7, 0.6, 0.9, 20), m.darkSteel, { x: 0.05, y: 0.65 });
+  b.add(cyl(0.74, 0.74, 0.08, 20), m.rust, { x: 0.05, y: 1.1 });
+  b.add(cyl(0.32, 0.72, 0.3, 20), m.gray, { x: 0.05, y: 1.28 });
+  for (let i = 0; i < 3; i++) {
+    const a = i * Math.PI * 2 / 3;
+    const x = 0.05 + Math.cos(a) * 0.2, z = Math.sin(a) * 0.2;
+    b.add(cyl(0.065, 0.065, 1.3, 8), m.graphite, { x, y: 1.95, z });
+    b.add(box(0.95, 0.07, 0.07), m.copper, { x: (x - 0.75) / 2 - 0.05, y: 2.4 + i * 0.12, z, });
+  }
+  b.add(sph(0.16, 10, 8), m.glowLight, { x: 0.05, y: 1.45 }, 'arc');
+  b.add(rbox(0.16, 2.4, 0.16, 0.03), m.yellow, { x: -0.8, y: 1.4 });
+  b.add(rbox(0.5, 0.6, 0.45, 0.05), m.gray, { x: -0.6, y: 0.5, z: 0.62 });
+  for (let i = 0; i < 3; i++) b.add(box(0.02, 0.4, 0.08), m.darkSteel, { x: -0.34, y: 0.5, z: 0.48 + i * 0.13 });
+  strut(b, m.darkSteel, [-0.25, 1.35, -0.25], [-0.6, 1.9, -0.6], 0.16);
+  b.add(cyl(0.14, 0.16, 1.4, 12), m.darkSteel, { x: -0.65, y: 2.3, z: -0.65 });
+  b.add(rbox(0.5, 0.08, 0.2, 0.02), m.rust, { x: 0.78, y: 0.55, rz: -0.3 });
+  b.add(box(0.1, 0.1, 0.1), m.glowLight, { x: -0.3, y: 0.85, z: 0.85 }, 'status');
+  return b.build();
+}
+
+function mAluSmelter(m) {
+  const b = new Builder();
+  pad(b, m);
+  for (const z of [-0.55, 0, 0.55]) {
+    b.add(rbox(1.25, 0.5, 0.42, 0.05), m.darkSteel, { x: 0.05, y: 0.45, z });
+    b.add(box(1.0, 0.04, 0.26), m.glowFurnace, { x: 0.05, y: 0.71, z }, 'furnace');
+    b.add(rbox(1.05, 0.08, 0.32, 0.02), m.gray, { x: 0.05, y: 0.82, z });
+    for (const x of [-0.35, 0, 0.35]) b.add(cyl(0.04, 0.04, 0.3, 6), m.graphite, { x: x + 0.05, y: 0.97, z });
+  }
+  for (const x of [-0.65, 0.75]) b.add(box(0.1, 0.1, 1.7), m.copper, { x, y: 0.6 });
+  b.add(box(0.08, 0.08, 1.7), m.copper, { x: 0.05, y: 1.14 });
+  // köprü vinç
+  for (const z of [-0.85, 0.85]) {
+    b.add(box(0.1, 1.7, 0.1), m.yellow, { x: -0.8, y: 1.0, z });
+    b.add(box(0.1, 1.7, 0.1), m.yellow, { x: 0.85, y: 1.0, z });
+    b.add(box(1.75, 0.12, 0.1), m.yellow, { x: 0.02, y: 1.85, z });
+  }
+  b.add(box(0.3, 0.14, 1.8), m.yellow, { x: 0.3, y: 1.95 });
+  b.add(cyl(0.12, 0.14, 2.5, 12), m.darkSteel, { x: -0.78, y: 1.35, z: -0.0 });
+  b.add(cyl(0.16, 0.16, 0.08, 12), m.rust, { x: -0.78, y: 2.6, z: 0 });
+  b.add(box(0.1, 0.1, 0.1), m.glowLight, { x: 0.86, y: 1.4, z: 0.6 }, 'status');
+  return b.build();
+}
+
+function armParts(b, m, P, rot = 0) {
+  b.add(cyl(0.2, 0.25, 0.22, 12), m.yellow, { y: 0.11 }, 'arm', P);
+  b.add(rbox(0.18, 0.8, 0.18, 0.04), m.yellow, { y: 0.5, x: 0.12 * Math.cos(rot), z: -0.12 * Math.sin(rot), rz: -0.3 * Math.cos(rot), rx: -0.3 * Math.sin(rot) }, 'arm', P);
+  b.add(rbox(0.7, 0.14, 0.14, 0.04), m.yellow, { y: 0.88, x: 0.45 * Math.cos(rot), z: -0.45 * Math.sin(rot), ry: rot }, 'arm', P);
+  b.add(cyl(0.05, 0.05, 0.35, 8), m.darkSteel, { y: 0.7, x: 0.78 * Math.cos(rot), z: -0.78 * Math.sin(rot) }, 'arm', P);
+  b.add(cyl(0.09, 0.09, 0.22, 10), m.darkSteel, { y: 0.88, x: 0.15 * Math.cos(rot), z: -0.15 * Math.sin(rot), rx: Math.PI / 2, ry: rot }, 'arm', P);
+}
+function mAdvAssembler(m) {
+  const b = new Builder();
+  pad(b, m, 3.9, 0.2);
+  b.add(rbox(3.4, 0.2, 3.4, 0.05), m.gray, { y: 0.3 });
+  // konveyör
+  b.add(box(3.3, 0.06, 0.6), m.belt, { y: 0.5 }, 'belt');
+  for (const z of [-0.34, 0.34]) b.add(box(3.3, 0.14, 0.08), m.darkSteel, { y: 0.47, z });
+  // iskelet ve cam duvarlar
+  for (const x of [-1.65, 1.65]) for (const z of [-1.65, 1.65]) b.add(rbox(0.16, 2.2, 0.16, 0.03), m.darkSteel, { x, y: 1.3, z });
+  for (const z of [-1.65, 1.65]) { b.add(box(3.3, 0.14, 0.14), m.darkSteel, { y: 2.4, z }); b.add(box(3.2, 1.2, 0.04), m.glass, { y: 1.0, z }); b.add(box(3.3, 0.1, 0.1), m.hazard, { y: 0.4, z }); }
+  for (const x of [-1.65, 1.65]) b.add(box(0.14, 0.14, 3.3), m.darkSteel, { x, y: 2.4 });
+  b.add(box(0.14, 0.14, 3.3), m.yellow, { x: 0, y: 2.4 });
+  b.add(box(0.04, 1.2, 1.4), m.glass, { x: -1.65, y: 1.0, z: 0.9 });
+  b.add(rbox(0.7, 1.0, 1.2, 0.05), m.accent, { x: -1.35, y: 0.85, z: -0.9 });
+  b.add(box(0.02, 0.25, 0.8), m.glowWindow, { x: -0.99, y: 1.05, z: -0.9 }, 'window');
+  // çıkış ağzı
+  b.add(rbox(0.5, 0.7, 0.9, 0.05), m.darkSteel, { x: 1.7, y: 0.65 });
+  b.add(box(0.04, 0.4, 0.6), m.rubber, { x: 1.96, y: 0.6 });
+  for (let i = 0; i < 3; i++) b.add(box(0.05, 0.05, 0.05), m.darkSteel, { x: -0.8 + i * 0.6, y: 0.56 });
+  armParts(b, m, [-0.6, 0.35, 0.95], -Math.PI / 2);
+  armParts(b, m, [0.6, 0.35, -0.95], Math.PI / 2);
+  b.add(box(0.12, 0.12, 0.12), m.glowLight, { x: 1.7, y: 1.1, z: 0.35 }, 'status');
+  return b.build();
+}
+
+function mRefinery(m) {
+  const b = new Builder();
+  pad(b, m, 3.9, 0.2);
+  // damıtma kolonları
+  for (const [x, z, r, h] of [[-1.0, -0.9, 0.34, 4.2], [-0.15, -1.15, 0.26, 3.2], [0.55, -1.25, 0.2, 2.4]]) {
+    b.add(cyl(r, r, h, 16), m.white, { x, y: 0.2 + h / 2, z });
+    b.add(sph(r, 16, 8), m.white, { x, y: 0.2 + h, z, sy: 0.5 });
+    for (let y = 0.9; y < h; y += 0.9) {
+      b.add(cyl(r + 0.12, r + 0.12, 0.04, 16), m.darkSteel, { x, y: y + 0.2, z });
+      b.add(new THREE.TorusGeometry(r + 0.12, 0.015, 4, 16), m.yellow, { x, y: y + 0.45, z, rx: Math.PI / 2 });
+    }
+    b.add(rbox(0.1, h - 0.3, 0.1, 0.02), m.yellow, { x: x + r + 0.08, y: 0.2 + (h - 0.3) / 2, z });
+  }
+  // küresel tank
+  for (const [x, z] of [[0.95, 0.95]]) {
+    b.add(sph(0.62, 18, 12), m.white, { x, y: 1.05, z });
+    for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + 0.6; b.add(cyl(0.05, 0.05, 1.0, 6), m.steel, { x: x + Math.cos(a) * 0.5, y: 0.6, z: z + Math.sin(a) * 0.5 }); }
+  }
+  // yatay tank
+  b.add(cyl(0.32, 0.32, 1.5, 16), m.gray, { x: -0.6, y: 0.62, z: 0.95, rz: Math.PI / 2 });
+  for (const x of [-1.35, 0.15]) b.add(sph(0.32, 12, 8), m.gray, { x, y: 0.62, z: 0.95, sx: 0.4 });
+  // boru rafı
+  for (const x of [-1.4, -0.3, 0.8]) for (const z of [-0.05, 0.35]) b.add(box(0.08, 1.4, 0.08), m.steel, { x, y: 0.9, z });
+  for (const z of [-0.05, 0.35]) b.add(box(2.3, 0.08, 0.08), m.steel, { x: -0.3, y: 1.6, z });
+  b.add(cyl(0.06, 0.06, 2.6, 8), m.copper, { x: -0.3, y: 1.72, z: 0.05, rz: Math.PI / 2 });
+  b.add(cyl(0.06, 0.06, 2.6, 8), m.darkSteel, { x: -0.3, y: 1.72, z: 0.2, rz: Math.PI / 2 });
+  b.add(cyl(0.05, 0.05, 2.6, 8), m.rust, { x: -0.3, y: 1.72, z: 0.32, rz: Math.PI / 2 });
+  // ısıtıcı fırın
+  b.add(rbox(0.7, 0.8, 0.6, 0.05), m.brick, { x: 1.3, y: 0.6, z: -0.3 });
+  b.add(box(0.04, 0.3, 0.4), m.glowFurnace, { x: 1.66, y: 0.5, z: -0.3 }, 'furnace');
+  // meşale bacası
+  b.add(cyl(0.07, 0.1, 4.4, 8), m.darkSteel, { x: -1.55, y: 2.4, z: 1.55 });
+  b.add(cyl(0.11, 0.08, 0.15, 8), m.rust, { x: -1.55, y: 4.65, z: 1.55 });
+  for (const s of [-1, 1]) strut(b, m.steel, [-1.55 + s * 0.3, 0.2, 1.55], [-1.55, 3.0, 1.55], 0.04);
+  b.add(box(0.12, 0.12, 0.12), m.glowLight, { x: 1.66, y: 1.1, z: 0.0 }, 'status');
+  return b.build();
+}
+
+function mChemPlant(m) {
+  const b = new Builder();
+  pad(b, m);
+  for (const z of [-0.5, 0.45]) {
+    b.add(cyl(0.34, 0.34, 1.3, 16), m.white, { x: -0.5, y: 0.85, z });
+    b.add(sph(0.34, 16, 8), m.white, { x: -0.5, y: 1.5, z, sy: 0.45 });
+    b.add(cyl(0.36, 0.36, 0.06, 16), m.yellow, { x: -0.5, y: 1.15, z });
+  }
+  // cam reaktör kabı
+  b.add(cyl(0.4, 0.4, 0.15, 16), m.steel, { x: 0.38, y: 0.32 });
+  b.add(cyl(0.36, 0.36, 0.8, 16), m.glass, { x: 0.38, y: 0.8 });
+  b.add(cyl(0.38, 0.4, 0.14, 16), m.steel, { x: 0.38, y: 1.27 });
+  b.add(cyl(0.3, 0.3, 0.62, 12), m.patina, { x: 0.38, y: 0.72 });
+  const P = [0.38, 1.34, 0];
+  b.add(rbox(0.22, 0.25, 0.22, 0.04), m.darkSteel, { y: 0.15 }, 'spin', P);
+  b.add(box(0.36, 0.05, 0.05), m.steel, { y: 0.3 }, 'spin', P);
+  // borular
+  b.add(cyl(0.05, 0.05, 0.9, 8), m.copper, { x: -0.05, y: 1.35, z: -0.5, rz: Math.PI / 2 });
+  b.add(cyl(0.05, 0.05, 0.9, 8), m.copper, { x: -0.05, y: 1.15, z: 0.45, rz: Math.PI / 2 });
+  b.add(cyl(0.05, 0.05, 1.0, 8), m.steel, { x: 0.38, y: 1.6, z: -0.1, rx: Math.PI / 2 });
+  b.add(cyl(0.11, 0.13, 2.1, 10), m.darkSteel, { x: -0.85, y: 1.25, z: -0.05 });
+  b.add(cyl(0.14, 0.14, 0.08, 10), m.yellow, { x: -0.85, y: 2.3, z: -0.05 });
+  b.add(rbox(0.3, 0.45, 0.5, 0.04), m.gray, { x: 0.78, y: 0.45, z: 0.55 });
+  b.add(box(0.1, 0.1, 0.1), m.glowLight, { x: 0.94, y: 0.6, z: 0.45 }, 'status');
+  return b.build();
+}
+
+function mEnricher(m) {
+  const b = new Builder();
+  pad(b, m);
+  b.add(rbox(1.6, 0.1, 1.6, 0.03), m.hazard, { y: 0.25 });
+  for (const x of [-0.6, -0.12]) for (const z of [-0.55, 0, 0.55]) {
+    const P = [x, 0, z];
+    b.add(cyl(0.15, 0.15, 1.55, 14), m.white, { y: 1.07 }, 'spinFast', P);
+    b.add(cyl(0.155, 0.155, 0.08, 14), m.darkSteel, { y: 1.3 }, 'spinFast', P);
+    b.add(box(0.04, 1.2, 0.05), m.blueSteel, { x: 0.14, y: 1.05 }, 'spinFast', P);
+    b.add(cyl(0.17, 0.19, 0.2, 14), m.darkSteel, { x, y: 0.38, z });
+  }
+  for (const x of [-0.6, -0.12]) b.add(cyl(0.04, 0.04, 1.4, 6), m.steel, { x, y: 1.95, rx: Math.PI / 2 });
+  b.add(cyl(0.04, 0.04, 0.6, 6), m.steel, { x: -0.36, y: 1.95, rz: Math.PI / 2 });
+  b.add(rbox(0.5, 1.1, 1.3, 0.05), m.gray, { x: 0.62, y: 0.8 });
+  b.add(box(0.02, 0.3, 0.9), m.glowWindow, { x: 0.88, y: 1.0 }, 'window');
+  b.add(box(0.1, 0.1, 0.1), m.glowLight, { x: 0.88, y: 1.4, z: 0.5 }, 'status');
+  return b.build();
+}
+
+function mPole(m) {
+  const b = new Builder();
+  b.add(cyl(0.25, 0.3, 0.2, 10), m.concrete, { y: 0.1 });
+  b.add(cyl(0.07, 0.1, 3.2, 8), m.darkSteel, { y: 1.75 });
+  b.add(box(0.1, 0.1, 1.2), m.darkSteel, { y: 3.05 });
+  for (const z of [-0.5, 0.5]) strut(b, m.steel, [0, 2.6, 0], [0, 3.0, z * 0.8], 0.04);
+  for (const [z, y] of [[-0.5, 3.15], [0.5, 3.15], [0, 3.45]]) {
+    b.add(cyl(0.05, 0.05, 0.14, 8), m.insulator, { y, z });
+    b.add(cyl(0.07, 0.07, 0.03, 8), m.insulator, { y: y - 0.03, z });
+  }
+  b.add(rbox(0.18, 0.22, 0.12, 0.02), m.gray, { y: 2.2, x: 0.1 });
+  return b.build();
+}
+
+function mPoleBig(m) {
+  const b = new Builder();
+  for (const x of [-0.75, 0.75]) for (const z of [-0.75, 0.75]) {
+    b.add(rbox(0.35, 0.25, 0.35, 0.04), m.concrete, { x, y: 0.12, z });
+    strut(b, m.steel, [x, 0.2, z], [x * 0.25, 6.0, z * 0.25], 0.09);
+  }
+  const lv = [0.2, 1.6, 2.9, 4.0, 5.0, 6.0];
+  const w = (y) => 0.75 + (0.1875 - 0.75) * (y - 0.2) / 5.8;
+  for (let i = 0; i < lv.length - 1; i++) {
+    const y0 = lv[i], y1 = lv[i + 1], a = w(y0), c = w(y1);
+    for (const s of [-1, 1]) {
+      strut(b, m.steel, [-a, y0, s * a], [c, y1, s * c], 0.04);
+      strut(b, m.steel, [s * a, y0, -a], [s * c, y1, c], 0.04);
+    }
+    b.add(box(c * 2, 0.05, 0.05), m.steel, { y: y1, z: c }); b.add(box(c * 2, 0.05, 0.05), m.steel, { y: y1, z: -c });
+    b.add(box(0.05, 0.05, c * 2), m.steel, { y: y1, x: c }); b.add(box(0.05, 0.05, c * 2), m.steel, { y: y1, x: -c });
+  }
+  // kollar
+  for (const [y, L] of [[5.0, 1.5], [6.0, 1.0]]) {
+    b.add(box(0.12, 0.12, L * 2), m.steel, { y });
+    for (const s of [-1, 1]) {
+      strut(b, m.steel, [0, y + 0.45, 0], [0, y, s * L], 0.05);
+      b.add(cyl(0.05, 0.05, 0.4, 8), m.ceramic, { y: y - 0.25, z: s * (L - 0.1) });
+      for (let k = 0; k < 3; k++) b.add(cyl(0.09, 0.09, 0.025, 8), m.ceramic, { y: y - 0.12 - k * 0.11, z: s * (L - 0.1) });
+    }
+  }
+  b.add(cyl(0.02, 0.02, 0.7, 4), m.steel, { y: 6.5 });
+  b.add(sph(0.06, 6, 4), m.glowLight, { y: 6.85 }, 'beacon');
+  return b.build();
+}
+
+function mGenFuel(m) {
+  const b = new Builder();
+  pad(b, m);
+  b.add(rbox(1.5, 0.15, 1.1, 0.03), m.darkSteel, { y: 0.27 });
+  b.add(rbox(1.4, 0.85, 1.0, 0.08), m.yellow, { x: 0.05, y: 0.77 });
+  for (let i = 0; i < 6; i++) b.add(box(0.02, 0.5, 0.06), m.darkSteel, { x: 0.76, y: 0.78, z: -0.35 + i * 0.14 });
+  b.add(box(1.0, 0.04, 1.02), m.hazard, { x: -0.1, y: 0.4 });
+  b.add(cyl(0.38, 0.38, 0.1, 18), m.darkSteel, { x: 0.35, y: 1.24 });
+  for (let i = 0; i < 6; i++) b.add(box(0.33, 0.02, 0.1), m.blade, { rx: 0.4, ry: i * Math.PI / 3 }, 'fan', [0.35, 1.3, 0]);
+  b.add(cyl(0.3, 0.3, 1.5, 16), m.rust, { x: 0, y: 0.45, z: 0.75, rz: Math.PI / 2, sx: 0.8 });
+  for (const z of [-0.55, -0.25]) {
+    b.add(cyl(0.07, 0.08, 1.0, 8), m.darkSteel, { x: -0.6, y: 1.55, z });
+    b.add(cyl(0.09, 0.09, 0.06, 8), m.rust, { x: -0.6, y: 2.05, z });
+  }
+  b.add(box(0.1, 0.1, 0.1), m.glowLight, { x: 0.76, y: 1.05, z: 0.4 }, 'status');
+  return b.build();
+}
+
+function mWind(m) {
+  const b = new Builder();
+  b.add(cyl(0.55, 0.65, 0.25, 16), m.concrete, { y: 0.12 });
+  b.add(cyl(0.11, 0.22, 5.3, 14), m.white, { y: 2.9 });
+  b.add(rbox(0.25, 0.4, 0.2, 0.04), m.gray, { x: 0.22, y: 0.5 });
+  b.add(rbox(0.9, 0.36, 0.36, 0.1), m.white, { x: -0.12, y: 5.62 });
+  b.add(box(0.5, 0.02, 0.1), m.hazard, { x: -0.2, y: 5.81 });
+  b.add(box(0.06, 0.06, 0.06), m.glowLight, { x: -0.5, y: 5.84 }, 'beacon');
+  const P = [0.4, 5.62, 0];
+  b.add(sph(0.15, 12, 8), m.white, { x: 0.05, sx: 1.4 }, 'rotorX', P);
+  for (let i = 0; i < 3; i++) {
+    const a = i * Math.PI * 2 / 3;
+    b.add(rbox(0.05, 1.6, 0.17, 0.02), m.white, { x: 0.02, y: Math.cos(a) * 0.92, z: Math.sin(a) * 0.92, rx: a }, 'rotorX', P);
+  }
+  return b.build();
+}
+
+function mBatteryBank(m) {
+  const b = new Builder();
+  pad(b, m);
+  for (const z of [-0.45, 0.45]) {
+    b.add(rbox(1.3, 1.1, 0.7, 0.06), m.gray, { x: -0.15, y: 0.75, z });
+    b.add(box(1.32, 0.06, 0.72), m.hazard, { x: -0.15, y: 0.26, z });
+    for (let i = 0; i < 4; i++) b.add(box(0.03, 0.1, 0.5), m.glowLight, { x: 0.51, y: 0.45 + i * 0.18, z }, 'charge');
+    b.add(rbox(1.0, 0.18, 0.5, 0.04), m.darkSteel, { x: -0.25, y: 1.4, z });
+  }
+  for (const z of [-0.45, 0.45]) for (const x of [-0.6, 0.1]) b.add(cyl(0.05, 0.05, 0.15, 8), m.copper, { x, y: 1.55, z: z + 0.15 });
+  b.add(box(0.06, 0.06, 1.0), m.copper, { x: -0.25, y: 1.62 });
+  b.add(cyl(0.2, 0.2, 0.08, 12), m.darkSteel, { x: -0.6, y: 1.55, z: -0.45 });
+  b.add(box(0.1, 0.1, 0.1), m.glowLight, { x: 0.52, y: 1.2, z: 0 }, 'status');
+  return b.build();
+}
+
+function mReactor(m) {
+  const b = new Builder();
+  pad(b, m, 3.9, 0.2);
+  // soğutma kulesi
+  const pts = [];
+  for (let i = 0; i <= 10; i++) {
+    const t = i / 10, y = t * 3.6;
+    const r = 0.62 + 0.36 * Math.pow((t - 0.72) / 0.72, 2) * (t < 0.72 ? 1 : 0.4);
+    pts.push(new THREE.Vector2(r, y));
+  }
+  b.add(new THREE.LatheGeometry(pts, 24), m.concreteDS, { x: -0.95, y: 0.15, z: -0.95 });
+  b.add(cyl(0.68, 0.68, 0.05, 20), m.darkSteel, { x: -0.95, y: 3.2, z: -0.95 });
+  for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; b.add(box(0.06, 0.4, 0.06), m.darkSteel, { x: -0.95 + Math.cos(a) * 0.98, y: 0.35, z: -0.95 + Math.sin(a) * 0.98 }); }
+  // muhafaza kubbesi
+  b.add(cyl(0.85, 0.88, 1.1, 24), m.concrete, { x: 0.85, y: 0.75, z: -0.85 });
+  b.add(new THREE.SphereGeometry(0.85, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), m.concrete, { x: 0.85, y: 1.3, z: -0.85 });
+  b.add(cyl(0.87, 0.87, 0.08, 24), m.yellow, { x: 0.85, y: 1.1, z: -0.85 });
+  b.add(sph(0.08, 8, 6), m.glowLight, { x: 0.85, y: 2.2, z: -0.85 }, 'beacon');
+  // türbin salonu
+  b.add(rbox(1.9, 1.0, 1.1, 0.08), m.gray, { x: 0.35, y: 0.7, z: 0.95 });
+  b.add(rbox(1.95, 0.1, 1.15, 0.03), m.darkSteel, { x: 0.35, y: 1.24, z: 0.95 });
+  b.add(box(1.7, 0.2, 0.02), m.glowWindow, { x: 0.35, y: 0.9, z: 1.51 }, 'window');
+  b.add(box(0.02, 0.2, 0.8), m.glowWindow, { x: 1.31, y: 0.9, z: 0.95 }, 'window');
+  b.add(rbox(0.6, 0.6, 0.6, 0.05), m.accent, { x: -1.1, y: 0.5, z: 1.0 });
+  // borular
+  b.add(cyl(0.1, 0.1, 1.6, 10), m.steel, { x: -0.1, y: 0.6, z: -0.9, rz: Math.PI / 2 });
+  b.add(cyl(0.09, 0.09, 1.0, 10), m.steel, { x: 0.85, y: 0.5, z: 0.0, rx: Math.PI / 2 });
+  b.add(box(0.06, 0.12, 0.6), m.hazard, { x: 1.85, y: 0.3, z: -0.85 });
+  b.add(box(0.12, 0.12, 0.12), m.glowLight, { x: 1.31, y: 1.15, z: 0.4 }, 'status');
+  return b.build();
+}
+
+function mLamp(m) {
+  const b = new Builder();
+  b.add(cyl(0.28, 0.32, 0.2, 10), m.concrete, { y: 0.1 });
+  b.add(cyl(0.06, 0.09, 3.4, 8), m.darkSteel, { y: 1.85 });
+  b.add(box(0.7, 0.07, 0.1), m.darkSteel, { y: 3.5 });
+  b.add(rbox(0.2, 0.3, 0.14, 0.02), m.gray, { y: 1.0, x: 0.09 });
+  for (const s of [-1, 1]) {
+    b.add(rbox(0.42, 0.24, 0.34, 0.05), m.darkSteel, { x: s * 0.3, y: 3.42, rz: s * -0.5 });
+    b.add(box(0.03, 0.17, 0.27), m.glowLight, { x: s * 0.502, y: 3.31, rz: s * -0.5 }, 'lamp');
+  }
+  return b.build();
+}
+
+function mWallSteel(m) {
+  const b = new Builder();
+  b.add(rbox(2.0, 0.22, 2.0, 0.05), m.concreteDark, { y: 0.11 });
+  b.add(rbox(1.9, 1.65, 1.9, 0.06), m.darkSteel, { y: 0.98 });
+  for (const s of [-1, 1]) {
+    b.add(box(1.94, 1.3, 0.06), m.steel, { y: 0.9, z: s * 0.96 });
+    b.add(box(0.06, 1.3, 1.94), m.steel, { y: 0.9, x: s * 0.96 });
+  }
+  b.add(box(1.98, 0.14, 1.98), m.hazard, { y: 1.65 });
+  b.add(rbox(1.7, 0.12, 1.7, 0.03), m.gray, { y: 1.85 });
+  return b.build();
+}
+
+function mTurretMissile(m) {
+  const b = new Builder();
+  b.add(cyl(0.88, 1.0, 0.6, 8), m.concrete, { y: 0.3 });
+  b.add(cyl(0.7, 0.74, 0.2, 20), m.darkSteel, { y: 0.7 });
+  const P = [0, 0.95, 0];
+  b.add(cyl(0.35, 0.4, 0.3, 14), m.darkSteel, { y: 0.0 }, 'yaw', P);
+  for (const z of [-0.5, 0.5]) b.add(rbox(0.5, 0.6, 0.12, 0.03), m.darkSteel, { y: 0.35, z }, 'yaw', P);
+  b.add(rbox(1.15, 0.72, 0.85, 0.08), m.accent, { x: -0.05, y: 0.55 }, 'yaw', P);
+  b.add(box(0.04, 0.66, 0.79), m.darkSteel, { x: 0.53, y: 0.55 }, 'yaw', P);
+  for (const y of [0.38, 0.72]) for (const z of [-0.25, 0, 0.25]) {
+    b.add(cyl(0.1, 0.1, 0.06, 10), m.rubber, { x: 0.56, y, z, rz: Math.PI / 2 }, 'yaw', P);
+    const cone = new THREE.ConeGeometry(0.07, 0.16, 8);
+    b.add(cone, m.white, { x: 0.6, y, z, rz: -Math.PI / 2 }, 'yaw', P);
+  }
+  b.add(rbox(0.3, 0.2, 0.3, 0.03), m.olive, { x: -0.45, y: 1.0, z: 0.2 }, 'yaw', P);
+  b.add(cyl(0.02, 0.02, 0.4, 4), m.steel, { x: -0.5, y: 1.1, z: -0.25 }, 'yaw', P);
+  b.add(box(0.08, 0.08, 0.08), m.glowLight, { x: 0.3, y: 0.95, z: -0.38 }, 'yawStatus', P);
+  return b.build();
+}
+
 // ---------------- birim modelleri ----------------
 function mMech(m) {
   const b = new Builder();
@@ -409,6 +855,14 @@ function mBrute(m) {
 }
 
 // ---------------- eşyalar (konveyör üstü) ----------------
+function merge(parts) {
+  const ps = parts.map((p) => {
+    const g = p.index ? p.toNonIndexed() : p;
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+    return g;
+  });
+  return mergeGeometries(ps, false);
+}
 function itemGeo(shape) {
   switch (shape) {
     case 'ore': {
@@ -427,6 +881,51 @@ function itemGeo(shape) {
     case 'board': { const g = new THREE.BoxGeometry(0.4, 0.04, 0.3); g.translate(0, 0.02, 0); return g; }
     case 'crate': { const g = new RoundedBoxGeometry(0.34, 0.24, 0.26, 1, 0.03); g.translate(0, 0.12, 0); return g; }
     case 'motor': { const g = new THREE.CylinderGeometry(0.14, 0.14, 0.36, 12); g.rotateZ(Math.PI / 2); g.translate(0, 0.14, 0); return g; }
+    case 'uore': {
+      const parts = [];
+      const base = new THREE.IcosahedronGeometry(0.18, 0); base.scale(1, 0.7, 0.9); base.translate(0, 0.12, 0); parts.push(base);
+      for (const [x, z, r] of [[0.06, 0.04, 0.3], [-0.07, -0.03, -0.35], [0.0, -0.08, 0.1]]) {
+        const c = new THREE.OctahedronGeometry(0.07, 0); c.scale(0.8, 2.0, 0.8); c.rotateZ(r); c.translate(x, 0.26, z); parts.push(c);
+      }
+      return merge(parts);
+    }
+    case 'barrel': {
+      const parts = [new THREE.CylinderGeometry(0.17, 0.17, 0.4, 14)];
+      for (const y of [-0.12, 0.12]) { const t = new THREE.TorusGeometry(0.17, 0.015, 4, 14); t.rotateX(Math.PI / 2); t.translate(0, y, 0); parts.push(t); }
+      const g = merge(parts); g.translate(0, 0.2, 0); return g;
+    }
+    case 'plate': { const g = new RoundedBoxGeometry(0.42, 0.05, 0.3, 1, 0.015); g.translate(0, 0.03, 0); return g; }
+    case 'pane': { const g = new THREE.BoxGeometry(0.4, 0.03, 0.3); g.rotateZ(0.12); g.translate(0, 0.05, 0); return g; }
+    case 'sheet': {
+      const parts = [];
+      for (let i = 0; i < 3; i++) { const s = new THREE.BoxGeometry(0.38, 0.025, 0.28); s.rotateY(i * 0.15); s.translate(0, 0.015 + i * 0.03, 0); parts.push(s); }
+      return merge(parts);
+    }
+    case 'cell': {
+      const a = new THREE.CylinderGeometry(0.1, 0.1, 0.32, 14); a.translate(0, 0.16, 0);
+      const c = new THREE.CylinderGeometry(0.04, 0.04, 0.05, 8); c.translate(0, 0.34, 0);
+      const g = merge([a, c]); g.rotateZ(Math.PI / 2); g.translate(0, 0.1, 0); return g;
+    }
+    case 'chip': {
+      const parts = [new THREE.BoxGeometry(0.26, 0.05, 0.26)];
+      for (const s of [-1, 1]) for (let i = 0; i < 4; i++) {
+        const p1 = new THREE.BoxGeometry(0.03, 0.02, 0.06); p1.translate(-0.09 + i * 0.06, -0.01, s * 0.15); parts.push(p1);
+        const p2 = new THREE.BoxGeometry(0.06, 0.02, 0.03); p2.translate(s * 0.15, -0.01, -0.09 + i * 0.06); parts.push(p2);
+      }
+      const g = merge(parts); g.translate(0, 0.04, 0); return g;
+    }
+    case 'rod': {
+      const parts = [];
+      for (const [x, z] of [[-0.05, -0.04], [0.05, -0.04], [0, 0.05]]) { const r = new THREE.CylinderGeometry(0.04, 0.04, 0.5, 8); r.rotateZ(Math.PI / 2); r.translate(0, 0.05, 0); r.translate(0, x * 0.6 + 0.02, z); parts.push(r); }
+      return merge(parts);
+    }
+    case 'rocket': {
+      const body = new THREE.CylinderGeometry(0.06, 0.06, 0.4, 10);
+      const nose = new THREE.ConeGeometry(0.06, 0.14, 10); nose.translate(0, 0.27, 0);
+      const parts = [body, nose];
+      for (let i = 0; i < 4; i++) { const f = new THREE.BoxGeometry(0.01, 0.1, 0.1); f.translate(0, -0.15, 0.08); f.rotateY(i * Math.PI / 2); parts.push(f); }
+      const g = merge(parts); g.rotateZ(-Math.PI / 2); g.translate(0, 0.08, 0); return g;
+    }
   }
   return new THREE.BoxGeometry(0.3, 0.3, 0.3);
 }
@@ -441,19 +940,43 @@ export function itemModels() {
     if (it.shape === 'crystal') { o.roughness = 0.1; o.metalness = 0.1; o.emissive = new THREE.Color(0x3a6a8a); o.emissiveIntensity = 0.4; }
     if (it.shape === 'board') { o.map = T.circuit; o.color = 0xffffff; }
     if (it.shape === 'wafer') { o.metalness = 0.8; o.roughness = 0.15; }
-    if (it.shape === 'crate') { o.map = T.metal; o.color = 0x6b6a3a; }
+    if (it.shape === 'crate') { o.map = T.metal; }
     if (it.shape === 'block') { o.map = T.concrete; }
+    if (it.shape === 'uore' || it.shape === 'rod') { o.emissive = new THREE.Color(0x2fbf3a); o.emissiveIntensity = 0.8; o.roughness = 0.4; o.metalness = 0.2; }
+    if (it.shape === 'uore') o.flatShading = true;
+    if (it.shape === 'pane') { o.transparent = true; o.opacity = 0.6; o.roughness = 0.05; o.metalness = 0.1; }
+    if (it.shape === 'barrel') { o.metalness = 0.55; o.roughness = 0.45; o.map = T.metal; }
+    if (it.shape === 'plate') { o.metalness = 0.85; o.roughness = 0.4; o.map = T.metal; }
+    if (it.shape === 'sheet') { o.roughness = 0.35; o.metalness = 0; }
+    if (it.shape === 'chip') { o.metalness = 0.35; o.roughness = 0.4; }
+    if (it.shape === 'cell') { o.metalness = 0.75; o.roughness = 0.3; }
+    if (it.shape === 'rocket') { o.metalness = 0.6; o.roughness = 0.35; }
     out[k] = { geo: itemGeo(it.shape), mat: new THREE.MeshStandardMaterial(o) };
   }
   return out;
 }
 
 const BUILDERS = {
-  belt: mBelt, miner: mMiner, smelter: mSmelter, assembler: mAssembler, foundry: mFoundry,
+  belt: (m) => mBelt(m), belt_fast: (m) => mBelt(m, true), miner: mMiner, assembler: mAssembler, foundry: mFoundry,
   generator: mGenerator, solar: mSolar, splitter: mSplitter, wall: mWall,
   turret_mg: mTurretMG, turret_cannon: mTurretCannon, turret_laser: mTurretLaser,
+  miner_mk2: mMinerMk2, pumpjack: mPumpjack, smelter_iron: mSmelterIron, smelter_copper: mSmelterCopper,
+  kiln: mKiln, arc_furnace: mArcFurnace, alu_smelter: mAluSmelter, adv_assembler: mAdvAssembler,
+  refinery: mRefinery, chem_plant: mChemPlant, enricher: mEnricher, pole: mPole, pole_big: mPoleBig,
+  gen_fuel: mGenFuel, wind: mWind, battery_bank: mBatteryBank, reactor: mReactor, lamp: mLamp,
+  wall_steel: mWallSteel, turret_missile: mTurretMissile,
   factory: mFactory, hq: mHQ,
   mech: mMech, tank: mTank, drone: (m) => mDrone(m), raider: mRaider, brute: mBrute, wasp: (m) => mDrone(m, true),
+};
+export const MODEL_META = {
+  chimney: {
+    smelter_iron: [[-0.45, 3.95, -0.38]], smelter_copper: [[-0.4, 2.5, 0.4]], kiln: [[-0.55, 2.65, -0.55]],
+    arc_furnace: [[-0.65, 3.05, -0.65]], alu_smelter: [[-0.78, 2.65, 0]], foundry: [[-0.15, 3.65, 0]],
+    generator: [[0.55, 2.2, 0.55]], gen_fuel: [[-0.6, 2.1, -0.55], [-0.6, 2.1, -0.25]],
+    refinery: [[-1.55, 4.75, 1.55]], chem_plant: [[-0.85, 2.35, -0.05]],
+    factory: [[-1.6, 4.2, -1.2], [-1.6, 4.2, 1.2]], reactor: [[-0.95, 3.8, -0.95]],
+  },
+  muzzle: { turret_missile: { py: 0.95, f: 0.65, u: 0.55 } },
 };
 const modelCache = {};
 export function getModel(type) {
