@@ -260,7 +260,10 @@ export function computeSpaces(project) {
     }
     else {
       const names = [];
-      for (const t of types) names.push(roomLabel(sorted.find((r) => r.type === t)));
+      for (const t of types) {
+        const of = sorted.filter((r) => r.type === t);
+        names.push(roomLabel(of.find((r) => !/\s\d+$/.test(roomLabel(r))) || of[0]));
+      }
       name = names.join(' + ');
     }
     const sp = { id: primary.id, rooms: sorted, primary, type: primary.type, types, mixed: types.length > 1, name, rects, gaps, area };
