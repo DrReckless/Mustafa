@@ -1,6 +1,6 @@
 // Dokunmatik 2B plan editörü
 import { drawPlan, fitView, PLAN_COLORS } from './plan2d.js';
-import { footprint, openingSegment, sideLength, roomAt, uid, fmtM, WALL_GAP } from './model.js';
+import { footprint, openingSegment, sideLength, roomAt, uid, fmtM, WALL_GAP, neighborRoom } from './model.js';
 import { CATALOG } from './catalog.js';
 
 const SNAP = 5;
@@ -436,9 +436,18 @@ export class PlanEditor {
     const op = kind === 'door'
       ? { id: uid('o'), kind: 'door', roomId: r.id, side, offset, width, swing: 'in', hinge: 'start', height: 210 }
       : { id: uid('o'), kind: 'window', roomId: r.id, side, offset, width, sill: r.type === 'banyo' || r.type === 'wc' ? 150 : r.type === 'mutfak' ? 100 : 90, height: r.type === 'banyo' || r.type === 'wc' ? 60 : 140 };
+    // Balkona açılan kapı: boydan sürgülü cam
+    if (kind === 'door') {
+      const nb = neighborRoom(p, op);
+      if (r.type === 'balkon' || nb?.room.type === 'balkon') {
+        const w = Math.min(180, len - 10);
+        if (w >= 120) Object.assign(op, { variant: 'sliding', panels: 2, frame: 'antrasit', height: 230, width: w, offset: Math.max(0, Math.min(len - w, snap(along - w / 2))) });
+      }
+    }
     p.openings.push(op);
     this.app.commit(before);
     this.select({ kind: 'opening', id: op.id });
+    if (op.variant === 'sliding') this.app.hint?.('Balkon kapısı boydan sürgülü cam olarak eklendi (özelliklerden değiştirebilirsiniz)');
   }
 
   // Görünür alanın ortası (yeni mobilya için)

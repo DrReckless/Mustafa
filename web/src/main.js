@@ -4,12 +4,13 @@ import { storage, shareFile, saveFile, utf8ToBase64, isAndroid } from './bridge.
 import {
   ROOM_TYPES, ROOM_TYPE_ORDER, TEMPLATES, projectFromTemplate, normalizeProject, roomLabel, roomArea, totalArea,
   fmtArea, fmtM, sideLength, uid, clone, footprint, roomAt,
+  computeSpaces, spaceOf, spaceRoomIds, roomNeighbors, isSliding,
 } from './model.js';
 import { CATALOG, CATEGORIES, makeItem } from './catalog.js';
 import { drawPlan, fitView, drawFurniture } from './plan2d.js';
 import { PlanEditor } from './editor.js';
 import { layoutProject } from './layout.js';
-import { WOOD, TILE, FURN_TONE, FABRIC, WALL_COLORS, clearTextureCache } from './textures.js';
+import { WOOD, TILE, FURN_TONE, FABRIC, WALL_COLORS, ACCENTS, THEMES, clearTextureCache } from './textures.js';
 
 const $app = document.getElementById('app');
 
@@ -358,6 +359,21 @@ app.onSelectionChange = (sel) => {
     const r = obj;
     title = roomLabel(r);
     sub = `${fmtM(r.w)} × ${fmtM(r.h)} m · ${fmtArea(roomArea(r))}`;
+    const sp = spaceOf(app.project, r.id);
+    const merged = sp && sp.rooms.length > 1;
+    const nbs = roomNeighbors(app.project, r);
+    const nbBox = nbs.length ? h('div', { class: 'nb-box' },
+      h('div', { class: 'field-label' }, 'Komşu odalarla ara duvar'),
+      ...nbs.map((nb) => h('div', { class: 'nb-row' },
+        h('span', {}, roomLabel(nb.room)),
+        segmented([{ value: 'wall', label: 'Var' }, { value: 'open', label: 'Yok' }], nb.state, (v) => change(() => {
+          app.project.partitions = app.project.partitions || {};
+          app.project.partitions[nb.key] = v;
+          refresh();
+          hint(v === 'open' ? 'Ara duvar kaldırıldı: iki oda tek mekân olarak döşenir' : 'Ara duvar eklendi', 2200);
+        })))),
+      merged ? h('div', { class: 'field-hint' }, `Birleşik mekân: ${sp.name} · ${fmtArea(sp.area)}. Otomatik yerleşim bu mekânı bir bütün olarak planlar.`) : null,
+    ) : null;
     body = h('div', {},
       h('div', { class: 'row' },
         field('Oda adı', (() => { const i = h('input', { class: 'input', value: r.name || '' }); i.addEventListener('change', () => change(() => { r.name = i.value.trim(); refresh(); })); return i; })()),
@@ -370,8 +386,9 @@ app.onSelectionChange = (sel) => {
       h('div', { class: 'row' },
         field('Genişlik (cm)', numInput(r.w, (v) => change(() => { r.w = v; clampOpenings(r); refresh(); }), { min: 60, max: 3000 })),
         field('Uzunluk (cm)', numInput(r.h, (v) => change(() => { r.h = v; clampOpenings(r); refresh(); }), { min: 60, max: 3000 }))),
+      nbBox,
       h('div', { class: 'actions' },
-        h('button', { class: 'btn gold', onclick: () => openAutoLayout([r.id]) }, icon('magic', 18), 'Bu odayı döşe'),
+        h('button', { class: 'btn gold', onclick: () => openAutoLayout([r.id]) }, icon('magic', 18), merged ? 'Bu mekânı döşe' : 'Bu odayı döşe'),
         h('button', { class: 'btn outline', onclick: () => change(() => { app.project.furniture = app.project.furniture.filter((f) => f.roomId !== r.id); }) }, 'Mobilyaları kaldır'),
         h('button', { class: 'btn outline', onclick: () => {
           const before = JSON.stringify(app.project);
@@ -383,18 +400,19 @@ app.onSelectionChange = (sel) => {
         h('button', { class: 'btn danger', onclick: () => {
           const before = JSON.stringify(app.project);
           app.project.rooms = app.project.rooms.filter((x) => x.id !== r.id);
+          for (const k of Object.keys(app.project.partitions || {})) if (k.split('|').includes(r.id)) delete app.project.partitions[k];
           app.project.openings = app.project.openings.filter((o) => o.roomId !== r.id);
           app.project.furniture = app.project.furniture.filter((f) => f.roomId !== r.id);
           app.commit(before);
           app.editor.select(null);
         } }, icon('trash', 18), 'Sil')),
-      h('div', { class: 'field-hint', style: { marginTop: '10px' } }, 'İpucu: Odayı sürükleyerek taşıyın, köşelerdeki tutamaçlarla boyutlandırın. Komşu odaya yaklaştırınca duvar payı bırakarak yapışır.'),
+      h('div', { class: 'field-hint', style: { marginTop: '10px' } }, 'İpucu: Odayı sürükleyerek taşıyın, köşelerdeki tutamaçlarla boyutlandırın. Komşu odaya yaklaştırınca duvar payı bırakarak yapışır. Aynı türden salon, mutfak, antre ve balkonlar aralarında kapı yoksa otomatik birleşir.'),
     );
   } else if (sel.kind === 'opening') {
     const o = obj;
     const room = app.project.rooms.find((r) => r.id === o.roomId);
     const len = sideLength(room, o.side);
-    title = o.kind === 'door' ? 'Kapı' : 'Pencere';
+    title = o.kind === 'door' ? (isSliding(o) ? 'Sürgülü Cam Kapı' : 'Kapı') : 'Pencere';
     sub = `${roomLabel(room)} · ${{ n: 'kuzey', s: 'güney', e: 'doğu', w: 'batı' }[o.side]} duvarı`;
     const items = [
       h('div', { class: 'row' },
@@ -402,6 +420,23 @@ app.onSelectionChange = (sel) => {
         field('Duvar başından (cm)', numInput(o.offset, (v) => change(() => { o.offset = Math.min(v, len - o.width); refresh(); }), { min: 0, max: len }))),
     ];
     if (o.kind === 'door') {
+      items.push(field('Kapı türü', segmented([{ value: 'hinged', label: 'Menteşeli' }, { value: 'sliding', label: 'Sürgülü cam' }], isSliding(o) ? 'sliding' : 'hinged', (v) => change(() => {
+        if (v === 'sliding') {
+          o.variant = 'sliding'; o.panels = o.panels || 2; o.frame = o.frame || 'antrasit'; o.height = 230;
+          const w = Math.min(len, Math.max(o.width, 180));
+          o.offset = Math.max(0, Math.min(o.offset - (w - o.width) / 2, len - w)); o.width = w;
+        } else { delete o.variant; o.height = 210; o.width = Math.min(o.width, 100); }
+        refresh();
+      }))));
+    }
+    if (isSliding(o)) {
+      items.push(
+        h('div', { class: 'row' },
+          field('Kanat sayısı', segmented([{ value: 2, label: '2' }, { value: 3, label: '3' }], o.panels || 2, (v) => change(() => (o.panels = v)))),
+          field('Çerçeve', segmented([{ value: 'antrasit', label: 'Antrasit' }, { value: 'beyaz', label: 'Beyaz' }], o.frame || 'antrasit', (v) => change(() => (o.frame = v))))),
+        field('Yükseklik (cm)', numInput(o.height ?? 230, (v) => change(() => (o.height = v)), { min: 180, max: 290 }), 'Boydan cam; 3B görünümde dokununca kanat kayarak açılır'),
+      );
+    } else if (o.kind === 'door') {
       items.push(
         h('div', { class: 'row' },
           field('Açılış yönü', segmented([{ value: 'in', label: 'İçe' }, { value: 'out', label: 'Dışa' }], o.swing || 'in', (v) => change(() => (o.swing = v)))),
@@ -414,7 +449,7 @@ app.onSelectionChange = (sel) => {
         field('Pencere yüksekliği (cm)', numInput(o.height ?? 140, (v) => change(() => (o.height = v)), { min: 30, max: 260 }))));
     }
     items.push(h('div', { class: 'actions' },
-      h('button', { class: 'btn outline', onclick: () => change(() => { o.kind = o.kind === 'door' ? 'window' : 'door'; if (o.kind === 'door') { o.swing = 'in'; o.hinge = 'start'; o.height = 210; } else { o.sill = 90; o.height = 140; } refresh(); }) }, o.kind === 'door' ? 'Pencereye çevir' : 'Kapıya çevir'),
+      h('button', { class: 'btn outline', onclick: () => change(() => { o.kind = o.kind === 'door' ? 'window' : 'door'; delete o.variant; if (o.kind === 'door') { o.swing = 'in'; o.hinge = 'start'; o.height = 210; } else { o.sill = 90; o.height = 140; } refresh(); }) }, o.kind === 'door' ? 'Pencereye çevir' : 'Kapıya çevir'),
       h('button', { class: 'btn danger', onclick: () => { change(() => { app.project.openings = app.project.openings.filter((x) => x.id !== o.id); }); app.editor.select(null); } }, icon('trash', 18), 'Sil')));
     items.push(h('div', { class: 'field-hint', style: { marginTop: '10px' } }, 'İpucu: Seçiliyken duvar boyunca sürükleyerek konumunu değiştirebilirsiniz.'));
     body = h('div', {}, items);
@@ -508,7 +543,8 @@ function openAutoLayout(roomIds = null) {
   const p = app.project;
   if (!p.rooms.length) { showToast('Önce kat planına oda ekleyin'); return; }
   const body = h('div', {}, h('div', { class: 'spinner' }), h('p', { style: { textAlign: 'center', color: '#74706a' } }, 'Yerleşim seçenekleri hesaplanıyor…'));
-  const scopeName = roomIds ? roomLabel(p.rooms.find((r) => r.id === roomIds[0])) : 'Tüm daire';
+  if (roomIds) roomIds = spaceRoomIds(p, roomIds);
+  const scopeName = roomIds ? (spaceOf(p, roomIds[0])?.name || roomLabel(p.rooms.find((r) => r.id === roomIds[0]))) : 'Tüm daire';
   const s = openSheet(body, { title: `Otomatik Yerleşim · ${scopeName}`, tall: true });
   setTimeout(() => {
     let options;
@@ -523,7 +559,8 @@ function openAutoLayout(roomIds = null) {
     body.innerHTML = '';
     body.append(h('p', { class: 'notes', style: { marginTop: 0 } },
       'Odalar; kapı açılma alanları, pencereler, geçiş yolları (en az 60 cm), mobilya ön boşlukları ve iç mimari kurallarına göre değerlendirildi. ' +
-      (roomIds ? 'Bu odadaki mevcut mobilyalar' : 'Mevcut tüm mobilyalar') + ' seçtiğiniz seçenekle değiştirilecek.'));
+      'Ara duvarı olmayan bitişik odalar tek mekân olarak birlikte planlandı. ' +
+      (roomIds ? 'Bu mekândaki mevcut mobilyalar' : 'Mevcut tüm mobilyalar') + ' seçtiğiniz seçenekle değiştirilecek.'));
     const unique = [];
     options.forEach((o, i) => {
       const sig = JSON.stringify(o.furniture.map((f) => [f.type, Math.round(f.x), Math.round(f.y), f.rot]));
@@ -569,13 +606,23 @@ async function open3D() {
   el.innerHTML = '';
   const view = h('div', { class: 'view3d' });
   const joy = h('div', { class: 'joy' }, h('i'));
-  const help = h('div', { class: 'walk-help', style: { display: 'none' } }, 'Sol altta parmağınızı sürükleyerek yürüyün, ekranın geri kalanında sürükleyerek etrafa bakın.');
+  const help = h('div', { class: 'walk-help', style: { display: 'none' } }, 'Sol altta parmağınızı sürükleyerek yürüyün, ekranın geri kalanında sürükleyerek etrafa bakın. Kapıya dokunarak açıp kapatın.');
+  const doorBtn = h('button', { class: 'door-btn', style: { display: 'none' }, onclick: () => { app.viewer.toggleDoor(app.viewer.nearDoor); updateDoorBtn(); } });
+  const updateDoorBtn = () => {
+    const d = app.viewer?.nearDoor;
+    if (!d || mode !== 'walk') { doorBtn.style.display = 'none'; return; }
+    doorBtn.style.display = '';
+    doorBtn.innerHTML = '';
+    doorBtn.append(icon('doorOpen', 20), `${d.label}: ${d.target > 0.5 ? 'Kapat' : 'Aç'}`);
+  };
   let mode = 'orbit';
   const seg = segmented([{ value: 'orbit', label: 'Kuşbakışı', icon: 'orbit' }, { value: 'walk', label: 'İçeride Gez', icon: 'walk' }], mode, (v) => {
     mode = v;
     app.viewer.setMode(v);
     help.style.display = v === 'walk' ? 'block' : 'none';
     wallBtn.style.display = v === 'walk' ? 'none' : '';
+    if (v === 'walk') setTimeout(() => { help.style.display = 'none'; }, 7000);
+    updateDoorBtn();
   });
   const wallBtn = h('button', { class: 'icon-btn', 'aria-label': 'Duvar yüksekliği', onclick: () => {
     const m = app.viewer.wallMode === 'full' ? 'low' : 'full';
@@ -591,9 +638,16 @@ async function open3D() {
   );
   view.append(
     h('div', { class: 'v3-top' }, seg),
-    joy, help,
+    joy, help, doorBtn,
     h('div', { class: 'v3-tools' },
       h('button', { class: 'icon-btn', onclick: () => app.viewer.resetCamera(), 'aria-label': 'Görünümü sıfırla' }, icon('fit')),
+      h('button', { class: 'icon-btn', 'aria-label': 'Tüm kapılar', onclick: () => {
+        const v = app.viewer;
+        if (!v.doors.length) { showToast('Planda kapı yok'); return; }
+        const open = v.doorsOpenCount() < v.doors.length / 2;
+        v.setAllDoors(open);
+        showToast(open ? 'Tüm kapılar açıldı' : 'Tüm kapılar kapatıldı');
+      } }, icon('doorOpen')),
       wallBtn,
       h('button', { class: 'icon-btn', onclick: openMaterials, 'aria-label': 'Malzemeler' }, icon('palette')),
       h('button', { class: 'icon-btn gold', onclick: takePhoto, 'aria-label': 'Fotoğraf' }, icon('camera'))),
@@ -621,9 +675,15 @@ async function open3D() {
     joy.style.top = j.y + 'px';
     joy.firstChild.style.transform = `translate(${j.dx}px, ${j.dy}px)`;
   };
+  app.viewer.onNearDoor = updateDoorBtn;
+  app.viewer.onDoorsChange = updateDoorBtn;
   app.viewer.resize();
   app.viewer.setProject(app.project);
   app.viewer.start();
+  if (!localStorage.getItem('hint-doors')) {
+    showToast('İpucu: Kapılara dokunarak açıp kapatabilirsiniz');
+    try { localStorage.setItem('hint-doors', '1'); } catch {}
+  }
 }
 
 function openMaterials() {
@@ -642,11 +702,18 @@ function openMaterials() {
   const render = () => {
     body.innerHTML = '';
     body.append(
-      field('Parke (oturma, yatak odaları)', chipRow(WOOD, 'wood', 'base')),
+      field('Hazır tema', h('div', { class: 'chips' }, ...Object.entries(THEMES).map(([k, t]) =>
+        h('button', { class: `chip theme ${st.accent === t.accent && st.furniture === t.furniture && st.fabric === t.fabric ? 'on' : ''}`, onclick: () => apply(() => {
+          for (const key of ['wood', 'tile', 'wall', 'furniture', 'fabric', 'accent']) st[key] = t[key];
+        }) }, h('span', { class: 'dots' }, ...ACCENTS[t.accent].colors.map((c) => h('i', { style: { background: c } }))), t.label))),
+        'Parke, seramik, duvar, mobilya ve kumaş renklerini uyumlu bir sette değiştirir'),
       field('Seramik (mutfak, banyo, antre)', chipRow(TILE, 'tile', 'base')),
       field('Duvar rengi', h('div', { class: 'swatches' }, ...WALL_COLORS.map((c) => h('button', { class: `swatch ${st.wall === c ? 'on' : ''}`, style: { background: c }, onclick: () => apply(() => (st.wall = c)), 'aria-label': c })))),
       field('Mobilya tonu', chipRow(FURN_TONE, 'furniture', 'body')),
       field('Döşeme / kumaş rengi', chipRow(FABRIC, 'fabric', 'color')),
+      field('Vurgu renkleri (kırlent, tablo, halı, berjer)', h('div', { class: 'chips' }, ...Object.entries(ACCENTS).map(([k, a]) =>
+        h('button', { class: `chip theme ${st.accent === k ? 'on' : ''}`, onclick: () => apply(() => (st.accent = k)) }, h('span', { class: 'dots' }, ...a.colors.map((c) => h('i', { style: { background: c } }))), a.label)))),
+      field('Dekor ve aksesuarlar', segmented([{ value: true, label: 'Açık' }, { value: false, label: 'Kapalı' }], st.decor !== false, (v) => apply(() => (st.decor = v))), 'Perde, tablo, kırlent, sarkıt lamba, tezgâh ve masa üstü aksesuarları'),
     );
   };
   render();
@@ -694,7 +761,7 @@ function openPresent() {
   body.append(
     h('div', { class: 'card' },
       h('h3', {}, 'Müşteri Sunumu (PDF)'),
-      h('p', {}, `${p.name} · ${fmtArea(totalArea(p))} · ${p.rooms.length} mekân. Kapakta firma logonuz yer alır.`)),
+      h('p', {}, `${p.name} · ${fmtArea(totalArea(p))} · ${computeSpaces(p).spaces.length} mekân. Kapakta firma logonuz yer alır.`)),
     h('div', { class: 'card' }, ...Object.keys(opts).map((k) => {
       const cb = h('input', { type: 'checkbox', checked: true });
       cb.addEventListener('change', () => (opts[k] = cb.checked));

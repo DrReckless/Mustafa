@@ -3,7 +3,7 @@
 // Böylece bitişik odalar arasındaki boşluk otomatik iç duvar olur,
 // dış kenarlar 20 cm dış duvar olur. Kapı/pencere açıklıkları ızgaradan oyulur.
 
-import { EXT_WALL, openingSegment } from './model.js';
+import { EXT_WALL, openingSegment, computeSpaces, activeOpenings } from './model.js';
 
 const G = 5; // hücre boyutu (cm)
 const CUT_DEPTH = 45;
@@ -50,8 +50,18 @@ export function computeWalls(project) {
       for (let i = ci(r.x); i < ci(r.x + r.w); i++) grid[j * cols + i] = ROOM;
   });
 
+  // Ara duvarı kaldırılmış odalar: aradaki boşluk zemin olur
+  for (const sp of computeSpaces(project).spaces) {
+    for (const q of sp.gaps) {
+      for (let j = Math.max(0, cj(q.y0)); j < Math.min(rows, cj(q.y1)); j++)
+        for (let i = Math.max(0, ci(q.x0)); i < Math.min(cols, ci(q.x1)); i++) grid[j * cols + i] = ROOM;
+    }
+  }
+
   // Açıklıkları oy
+  const active = new Set(activeOpenings(project));
   project.openings.forEach((op, idx) => {
+    if (!active.has(op)) return;
     const room = rooms.find((r) => r.id === op.roomId);
     if (!room) return;
     const s = openingSegment(op, room);

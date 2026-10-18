@@ -22,6 +22,8 @@ export const DEFAULT_STYLE = {
   wall: '#f2efe9',
   furniture: 'dogal', // dogal | ceviz | beyaz | antrasit
   fabric: 'gri', // gri | bej | lacivert | yesil | terracotta
+  accent: 'dogal', // dogal | modern | sicak | canli (kırlent, tablo, halı renkleri)
+  decor: true, // perde, tablo, aksesuar, sarkıt lamba
 };
 
 export const WALL_GAP = 10; // iki oda arasındaki iç duvar kalınlığı
@@ -38,7 +40,7 @@ export function newProject(name = 'Yeni Proje') {
   return {
     id: uid('p'),
     name,
-    version: 1,
+    version: 2,
     createdAt: now,
     updatedAt: now,
     wallHeight: 270,
@@ -46,6 +48,7 @@ export function newProject(name = 'Yeni Proje') {
     rooms: [],
     openings: [],
     furniture: [],
+    partitions: {},
   };
 }
 
@@ -58,7 +61,7 @@ export function roomArea(room) {
 }
 
 export function totalArea(project) {
-  return project.rooms.reduce((s, r) => s + roomArea(r), 0);
+  return computeSpaces(project).spaces.reduce((s, sp) => s + sp.area, 0);
 }
 
 export function fmtM(cm, digits = 2) {
@@ -120,11 +123,11 @@ export function neighborRoom(project, op) {
 
 // Bir odayı etkileyen tüm açıklıklar (kendi duvarındakiler + komşunun ortak duvardakileri),
 // odanın kendi koordinatlarına çevrilmiş halde.
-export function openingsForRoom(project, room) {
+export function openingsForRoom(project, room, active = null) {
   const list = [];
-  for (const op of project.openings) {
+  for (const op of active || activeOpenings(project)) {
     if (op.roomId === room.id) {
-      list.push({ op, side: op.side, offset: op.offset, width: op.width, own: true, swingIn: op.swing !== 'out' });
+      list.push({ op, side: op.side, offset: op.offset, width: op.width, own: true, swingIn: !isSliding(op) && op.swing !== 'out' });
       continue;
     }
     const nb = neighborRoom(project, op);
@@ -138,10 +141,164 @@ export function openingsForRoom(project, room) {
       if (offset < 0) { width += offset; offset = 0; }
       if (offset + width > len) width = len - offset;
       if (width <= 0) continue;
-      list.push({ op, side: nb.side, offset, width, own: false, swingIn: op.swing === 'out' });
+      list.push({ op, side: nb.side, offset, width, own: false, swingIn: !isSliding(op) && op.swing === 'out' });
     }
   }
   return list;
+}
+
+// ---------- Sürgülü kapı ----------
+
+export function isSliding(op) {
+  return op && op.kind === 'door' && op.variant === 'sliding';
+}
+
+// ---------- Açık mekânlar (ara duvarsız birleşen odalar) ----------
+// Bitişik iki oda arasında duvar olup olmayacağı:
+//  - kullanıcı seçimi (project.partitions["idA|idB"] = 'open' | 'wall') her zaman geçerlidir;
+//  - seçim yoksa: aynı türden salon / mutfak / yemek / antre / balkon odaları,
+//    aralarında kapı yoksa otomatik birleşir. Diğer türler duvarlı kalır.
+
+export const AUTO_OPEN_TYPES = ['salon', 'mutfak', 'yemek', 'antre', 'balkon'];
+const MAX_GAP = 2 * EXT_WALL;
+const MIN_CONTACT = 30;
+
+export function pairKey(a, b) {
+  return a < b ? a + '|' + b : b + '|' + a;
+}
+
+// İki odanın temas ettiği kenar (aradaki boşluk duvar kalınlığı kadar olabilir)
+export function roomContact(A, B) {
+  const ov = (a0, a1, b0, b1) => [Math.max(a0, b0), Math.min(a1, b1)];
+  const tryX = (P, Q) => {
+    const g = Q.x - (P.x + P.w);
+    if (g < -0.5 || g > MAX_GAP) return null;
+    const [lo, hi] = ov(P.y, P.y + P.h, Q.y, Q.y + Q.h);
+    if (hi - lo < MIN_CONTACT) return null;
+    return { dir: 'x', first: P, second: Q, g0: P.x + P.w, g1: Math.max(Q.x, P.x + P.w), lo, hi, sideFirst: 'e', sideSecond: 'w' };
+  };
+  const tryY = (P, Q) => {
+    const g = Q.y - (P.y + P.h);
+    if (g < -0.5 || g > MAX_GAP) return null;
+    const [lo, hi] = ov(P.x, P.x + P.w, Q.x, Q.x + Q.w);
+    if (hi - lo < MIN_CONTACT) return null;
+    return { dir: 'y', first: P, second: Q, g0: P.y + P.h, g1: Math.max(Q.y, P.y + P.h), lo, hi, sideFirst: 's', sideSecond: 'n' };
+  };
+  return tryX(A, B) || tryX(B, A) || tryY(A, B) || tryY(B, A);
+}
+
+export function contactRect(c) {
+  return c.dir === 'x' ? { x0: c.g0, x1: c.g1, y0: c.lo, y1: c.hi } : { x0: c.lo, x1: c.hi, y0: c.g0, y1: c.g1 };
+}
+
+// Açıklık bu temas kenarının üzerinde mi?
+function openingOnContact(op, c) {
+  let room, side;
+  if (op.roomId === c.first.id) { room = c.first; side = c.sideFirst; }
+  else if (op.roomId === c.second.id) { room = c.second; side = c.sideSecond; }
+  else return false;
+  if (op.side !== side) return false;
+  const s = openingSegment(op, room);
+  const a = s.horiz ? s.ax : s.ay, b = s.horiz ? s.bx : s.by;
+  const o = Math.min(b, c.hi) - Math.max(a, c.lo);
+  return o > Math.min(20, (b - a) / 2);
+}
+
+export function defaultPartition(project, c) {
+  const A = c.first, B = c.second;
+  if (A.type !== B.type || !AUTO_OPEN_TYPES.includes(A.type)) return 'wall';
+  // Aralarında kapı varsa duvar vardır
+  if (project.openings.some((op) => op.kind === 'door' && openingOnContact(op, c))) return 'wall';
+  return 'open';
+}
+
+export function partitionOf(project, c) {
+  const v = project.partitions?.[pairKey(c.first.id, c.second.id)];
+  return v === 'open' || v === 'wall' ? v : defaultPartition(project, c);
+}
+
+const spaceCache = new WeakMap();
+
+// Odaları açık mekânlara grupla. Sonuç proje içeriği değişene kadar önbellekte tutulur.
+export function computeSpaces(project) {
+  const key = JSON.stringify([project.rooms, project.partitions || null, project.openings.filter((o) => o.kind === 'door').map((o) => [o.roomId, o.side, o.offset, o.width])]);
+  const hit = spaceCache.get(project);
+  if (hit && hit.key === key) return hit.value;
+  const rooms = project.rooms;
+  const contacts = [];
+  for (let i = 0; i < rooms.length; i++) for (let j = i + 1; j < rooms.length; j++) {
+    const c = roomContact(rooms[i], rooms[j]);
+    if (!c) continue;
+    c.state = partitionOf(project, c);
+    c.auto = !project.partitions?.[pairKey(c.first.id, c.second.id)];
+    contacts.push(c);
+  }
+  const parent = new Map(rooms.map((r) => [r.id, r.id]));
+  const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  for (const c of contacts) if (c.state === 'open') parent.set(find(c.first.id), find(c.second.id));
+  const groups = new Map();
+  for (const r of rooms) {
+    const k = find(r.id);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  const spaces = [];
+  const byRoom = new Map();
+  for (const list of groups.values()) {
+    const sorted = list.slice().sort((a, b) => b.w * b.h - a.w * a.h);
+    const primary = sorted[0];
+    const ids = new Set(list.map((r) => r.id));
+    const gaps = contacts.filter((c) => c.state === 'open' && ids.has(c.first.id) && ids.has(c.second.id) && c.g1 - c.g0 > 0.5).map(contactRect);
+    const rects = list.map((r) => ({ x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h, roomId: r.id })).concat(gaps.map((g) => ({ ...g, gap: true })));
+    const area = rects.reduce((s, q) => s + (q.x1 - q.x0) * (q.y1 - q.y0), 0) / 10000;
+    const types = [...new Set(sorted.map((r) => r.type))];
+    let name;
+    if (types.length === 1) {
+      // "Salon 2" yerine "Salon": numarasız adı tercih et
+      const plain = sorted.find((r) => !/\s\d+$/.test(roomLabel(r)));
+      name = roomLabel(plain || primary);
+    }
+    else {
+      const names = [];
+      for (const t of types) names.push(roomLabel(sorted.find((r) => r.type === t)));
+      name = names.join(' + ');
+    }
+    const sp = { id: primary.id, rooms: sorted, primary, type: primary.type, types, mixed: types.length > 1, name, rects, gaps, area };
+    spaces.push(sp);
+    for (const r of list) byRoom.set(r.id, sp);
+  }
+  const value = { spaces, byRoom, contacts };
+  spaceCache.set(project, { key, value });
+  return value;
+}
+
+export function spaceOf(project, roomId) {
+  return computeSpaces(project).byRoom.get(roomId) || null;
+}
+
+// Verilen odaların bulunduğu mekânlardaki tüm oda kimlikleri
+export function spaceRoomIds(project, roomIds) {
+  const { byRoom } = computeSpaces(project);
+  const out = new Set();
+  for (const id of roomIds) {
+    const sp = byRoom.get(id);
+    if (sp) sp.rooms.forEach((r) => out.add(r.id)); else out.add(id);
+  }
+  return [...out];
+}
+
+// Bir odanın komşuları ve aradaki duvar durumu (özellik paneli için)
+export function roomNeighbors(project, room) {
+  return computeSpaces(project).contacts
+    .filter((c) => c.first.id === room.id || c.second.id === room.id)
+    .map((c) => ({ room: c.first.id === room.id ? c.second : c.first, state: c.state, auto: c.auto, key: pairKey(c.first.id, c.second.id) }));
+}
+
+// Açık bir kenarın üzerinde kalan (artık duvarı olmayan) açıklıklar hariç
+export function activeOpenings(project) {
+  const open = computeSpaces(project).contacts.filter((c) => c.state === 'open');
+  if (!open.length) return project.openings;
+  return project.openings.filter((op) => !open.some((c) => openingOnContact(op, c)));
 }
 
 // ---------- Mobilya geometrisi ----------
@@ -203,9 +360,11 @@ function builder() {
   };
   const door = (r, side, offset, width = 85, opts = {}) =>
     p.openings.push({ id: uid('o'), kind: 'door', roomId: r.id, side, offset, width, swing: 'in', hinge: 'start', height: 210, ...opts });
+  const slider = (r, side, offset, width = 180) =>
+    p.openings.push({ id: uid('o'), kind: 'door', variant: 'sliding', roomId: r.id, side, offset, width, height: 230, panels: 2, frame: 'antrasit', swing: 'in', hinge: 'start' });
   const win = (r, side, offset, width = 140, opts = {}) =>
     p.openings.push({ id: uid('o'), kind: 'window', roomId: r.id, side, offset, width, sill: 90, height: 140, ...opts });
-  return { p, room, door, win };
+  return { p, room, door, win, slider };
 }
 
 export const TEMPLATES = {
@@ -213,7 +372,7 @@ export const TEMPLATES = {
   '1+1': {
     label: '1+1', desc: '≈ 55 m²',
     build() {
-      const { p, room, door, win } = builder();
+      const { p, room, door, win, slider } = builder();
       const salon = room('salon', 0, 0, 480, 420);
       const mutfak = room('mutfak', 490, 0, 260, 280);
       const antre = room('antre', 490, 290, 260, 130);
@@ -225,8 +384,8 @@ export const TEMPLATES = {
       door(mutfak, 's', 30, 80);
       door(yatak, 'e', 20, 85);
       door(banyo, 'n', 10, 75, { swing: 'in' });
-      door(salon, 'n', 200, 90);
-      win(salon, 'n', 40, 140);
+      slider(salon, 'n', 60, 180);
+      win(salon, 'n', 320, 130);
       win(salon, 'w', 140, 160);
       win(mutfak, 'n', 70, 120, { sill: 100, height: 120 });
       win(yatak, 'w', 90, 150);
@@ -237,7 +396,7 @@ export const TEMPLATES = {
   '2+1': {
     label: '2+1', desc: '≈ 90 m²',
     build() {
-      const { p, room, door, win } = builder();
+      const { p, room, door, win, slider } = builder();
       const salon = room('salon', 0, 0, 540, 450);
       const mutfak = room('mutfak', 550, 0, 350, 300);
       const antre = room('antre', 550, 310, 350, 140);
@@ -264,7 +423,7 @@ export const TEMPLATES = {
   '3+1': {
     label: '3+1', desc: '≈ 125 m²',
     build() {
-      const { p, room, door, win } = builder();
+      const { p, room, door, win, slider } = builder();
       const salon = room('salon', 0, 0, 620, 480);
       const mutfak = room('mutfak', 630, 0, 380, 320);
       const antre = room('antre', 630, 330, 380, 150);
@@ -278,14 +437,14 @@ export const TEMPLATES = {
       door(antre, 'e', 20, 100, { name: 'Giriş' });
       door(antre, 's', 40, 100);
       door(salon, 'e', 380, 90);
-      door(salon, 'n', 260, 90);
+      slider(salon, 'n', 190, 180);
       door(mutfak, 's', 40, 80);
       door(yatak, 'n', 320, 85);
       door(banyo, 'n', 20, 75);
       door(wc, 'w', 30, 70);
       door(cocuk, 'n', 20, 85);
       door(calisma, 'w', 170, 85);
-      win(salon, 'n', 30, 160);
+      win(salon, 'n', 20, 140);
       win(salon, 'w', 150, 180);
       win(mutfak, 'n', 130, 130, { sill: 100, height: 120 });
       win(yatak, 's', 120, 170);
@@ -313,5 +472,7 @@ export function normalizeProject(p) {
   p.rooms = p.rooms || [];
   p.openings = (p.openings || []).filter((o) => p.rooms.some((r) => r.id === o.roomId));
   p.furniture = p.furniture || [];
+  p.partitions = p.partitions && typeof p.partitions === 'object' ? p.partitions : {};
+  p.version = 2;
   return p;
 }

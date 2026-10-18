@@ -1,6 +1,6 @@
 // 2B kat planı çizimi (editör ve PDF için ortak)
 
-import { ROOM_TYPES, roomLabel, roomArea, fmtM, fmtArea, openingSegment, footprint } from './model.js';
+import { ROOM_TYPES, roomLabel, roomArea, fmtM, fmtArea, openingSegment, footprint, computeSpaces, activeOpenings, isSliding } from './model.js';
 import { CATALOG } from './catalog.js';
 import { computeWalls } from './walls.js';
 
@@ -24,12 +24,37 @@ export function drawPlan(g, project, view, opts = {}) {
   g.lineCap = 'round';
   const T = (x, y) => [(x - view.ox) * scale, (y - view.oy) * scale];
 
+  const spaces = computeSpaces(project);
+  const roomFill = (r) => (print && opts.color === false ? '#ffffff' : ROOM_TYPES[r.type]?.color || '#f2f2f2');
   // Oda zeminleri
   for (const r of project.rooms) {
     const [x, y] = T(r.x, r.y);
-    g.fillStyle = print ? (opts.color === false ? '#ffffff' : ROOM_TYPES[r.type]?.color || '#f2f2f2') : ROOM_TYPES[r.type]?.color || '#f2f2f2';
+    g.fillStyle = roomFill(r);
     g.fillRect(x, y, r.w * scale, r.h * scale);
     if (opts.floorPattern !== false) drawFloorPattern(g, r, x, y, scale);
+  }
+  // Ara duvarı kaldırılmış odalar arasındaki zemin
+  for (const sp of spaces.spaces) {
+    for (const q of sp.gaps) {
+      const [x, y] = T(q.x0, q.y0);
+      g.fillStyle = roomFill(sp.primary);
+      g.fillRect(x - 0.5, y - 0.5, (q.x1 - q.x0) * scale + 1, (q.y1 - q.y0) * scale + 1);
+    }
+    // editörde birleşik odaların sınırını hafifçe göster
+    if (!print && sp.rooms.length > 1) {
+      g.save();
+      g.strokeStyle = 'rgba(120,100,60,0.35)';
+      g.lineWidth = 1;
+      g.setLineDash([5, 5]);
+      for (const c of spaces.contacts) {
+        if (c.state !== 'open' || !sp.rooms.includes(c.first)) continue;
+        const m = (c.g0 + c.g1) / 2;
+        const [ax, ay] = c.dir === 'x' ? T(m, c.lo) : T(c.lo, m);
+        const [bx, by] = c.dir === 'x' ? T(m, c.hi) : T(c.hi, m);
+        g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
+      }
+      g.restore();
+    }
   }
   // Kapı/pencere boşluklarının zemini
   for (const d of walls.doors) {
@@ -71,17 +96,26 @@ export function drawPlan(g, project, view, opts = {}) {
     else { g.moveTo(x + w / 2, y); g.lineTo(x + w / 2, y + h); }
     g.stroke();
   }
+  // Sürgülü cam kapılar
+  for (const d of walls.doors) {
+    if (!isSliding(d.op)) continue;
+    const [x, y] = T(d.x, d.y);
+    drawSlider(g, d.op, x, y, d.w * scale, d.h * scale, scale, opts.selectedId === d.op.id);
+  }
   // Kapı kanatları
-  for (const op of project.openings) {
-    if (op.kind !== 'door') continue;
+  for (const op of activeOpenings(project)) {
+    if (op.kind !== 'door' || isSliding(op)) continue;
     const room = project.rooms.find((r) => r.id === op.roomId);
     if (!room) continue;
     drawDoor(g, op, room, view, opts.selectedId === op.id);
   }
 
-  // Oda etiketleri
+  // Oda etiketleri (birleşik mekânlarda tek etiket)
   if (opts.labels !== false) {
-    for (const r of project.rooms) drawRoomLabel(g, r, view, { ...opts, project });
+    for (const sp of spaces.spaces) {
+      const r = sp.primary;
+      drawRoomLabel(g, r, view, { ...opts, project, name: sp.rooms.length > 1 ? sp.name : null, area: sp.rooms.length > 1 ? sp.area : null, roomIds: sp.rooms.map((x) => x.id) });
+    }
   }
   // Ölçüler
   if (opts.dims) for (const r of project.rooms) drawRoomDims(g, r, view);
@@ -182,6 +216,40 @@ function drawDoor(g, op, room, view, selected) {
   g.setLineDash([]);
 }
 
+function drawSlider(g, op, x, y, w, h, scale, selected) {
+  const horiz = w >= h;
+  const n = op.panels === 3 ? 3 : 2;
+  g.save();
+  g.fillStyle = '#ffffff';
+  g.fillRect(x, y, w, h);
+  g.strokeStyle = PLAN_COLORS.wall;
+  g.lineWidth = Math.max(1, scale * 1.2);
+  g.strokeRect(x, y, w, h);
+  // kanatlar: dönüşümlü iki rayda, birbirine biraz binerek
+  const L = horiz ? w : h, T = horiz ? h : w;
+  const pl = L / n;
+  g.strokeStyle = selected ? PLAN_COLORS.accent : '#4f7f9c';
+  g.lineWidth = Math.max(1.5, scale * 2.2);
+  for (let i = 0; i < n; i++) {
+    const a = i * pl - (i > 0 ? pl * 0.08 : 0), b = (i + 1) * pl + (i < n - 1 ? pl * 0.08 : 0);
+    const t = T * (i % 2 ? 0.66 : 0.34);
+    g.beginPath();
+    if (horiz) { g.moveTo(x + a + 1, y + t); g.lineTo(x + b - 1, y + t); }
+    else { g.moveTo(x + t, y + a + 1); g.lineTo(x + t, y + b - 1); }
+    g.stroke();
+  }
+  // kayma oku
+  g.lineWidth = Math.max(0.8, scale * 0.8);
+  g.strokeStyle = '#4f7f9c';
+  const ar = Math.min(pl * 0.3, 40 * scale);
+  const cx = horiz ? x + pl * 0.5 : x + T * 0.5, cy = horiz ? y + T * 0.5 : y + pl * 0.5;
+  g.beginPath();
+  if (horiz) { g.moveTo(cx - ar / 2, cy); g.lineTo(cx + ar / 2, cy); g.lineTo(cx + ar / 2 - 4, cy - 3); g.moveTo(cx + ar / 2, cy); g.lineTo(cx + ar / 2 - 4, cy + 3); }
+  else { g.moveTo(cx, cy - ar / 2); g.lineTo(cx, cy + ar / 2); g.lineTo(cx - 3, cy + ar / 2 - 4); g.moveTo(cx, cy + ar / 2); g.lineTo(cx + 3, cy + ar / 2 - 4); }
+  g.stroke();
+  g.restore();
+}
+
 function drawRoomLabel(g, r, view, opts) {
   const { scale } = view;
   const cx = (r.x + r.w / 2 - view.ox) * scale, cy = (r.y + r.h / 2 - view.oy) * scale;
@@ -189,9 +257,10 @@ function drawRoomLabel(g, r, view, opts) {
   const fs = opts.print ? base * 1.1 : base;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  const name = roomLabel(r);
-  const area = fmtArea(roomArea(r));
-  const hasFurn = opts.furniture !== false && opts.project?.furniture?.some((f) => f.roomId === r.id);
+  const name = opts.name || roomLabel(r);
+  const area = fmtArea(opts.area ?? roomArea(r));
+  const ids = opts.roomIds || [r.id];
+  const hasFurn = opts.furniture !== false && opts.project?.furniture?.some((f) => ids.includes(f.roomId));
   g.font = `600 ${fs}px "Inter", "Roboto", sans-serif`;
   const tw = Math.max(g.measureText(name).width, g.measureText(area).width);
   if (hasFurn || opts.labelBg) {
@@ -415,6 +484,15 @@ export function drawFurniture(g, f, view, selected) {
     case 'k_tall':
       box(X, Y, w, d, 1, '#fafafa');
       line(X + 4, Y + 4, X + w - 4, Y + d - 4);
+      break;
+    case 'k_island':
+      box(X, Y, w, d, 2, '#fafafa');
+      line(X, Y + 4, X + w, Y + 4);
+      line(X + 3, Y + d - 22, X + w - 3, Y + d - 22);
+      break;
+    case 'bar_stool':
+      circle(0, 0, Math.min(w, d) * 0.45, '#f4efe6');
+      circle(0, 0, Math.min(w, d) * 0.2);
       break;
     case 'k_upper':
       g.setLineDash([4, 3]);

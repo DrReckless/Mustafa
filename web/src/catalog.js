@@ -54,6 +54,8 @@ export const CATALOG = {
   k_tall: { name: 'Boy Dolabı', cat: 'mutfak', w: 60, d: 60, h: 215, front: 90, kind: 'k_tall' },
   k_upper: { name: 'Üst Dolap', cat: 'mutfak', w: 60, d: 35, h: 70, elev: 150, front: 0, kind: 'k_upper', wallOnly: true },
   k_corner: { name: 'Köşe Dolabı', cat: 'mutfak', w: 60, d: 60, h: 90, front: 0, kind: 'k_base' },
+  k_island: { name: 'Ada Tezgâh', cat: 'mutfak', w: 180, d: 90, h: 92, front: 0, kind: 'k_island' },
+  bar_stool: { name: 'Bar Taburesi', cat: 'mutfak', w: 40, d: 40, h: 78, front: 0, kind: 'bar_stool' },
 
   // Banyo
   toilet: { name: 'Klozet', cat: 'banyo', w: 40, d: 62, h: 80, front: 60, kind: 'toilet', side: 20 },

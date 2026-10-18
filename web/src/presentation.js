@@ -3,7 +3,7 @@
 
 import { jsPDF } from 'jspdf';
 import { drawPlan, fitView, drawOverallDims, roundRect } from './plan2d.js';
-import { ROOM_TYPES, roomLabel, roomArea, fmtArea, fmtM, totalArea } from './model.js';
+import { ROOM_TYPES, roomLabel, roomArea, fmtArea, fmtM, totalArea, computeSpaces } from './model.js';
 import { Viewer3D } from './view3d.js';
 import { WOOD, TILE, FURN_TONE, FABRIC } from './textures.js';
 
@@ -81,8 +81,9 @@ function dateStr() {
 }
 
 function roomCountLabel(p) {
-  const bed = p.rooms.filter((r) => ['yatak', 'cocuk', 'calisma'].includes(r.type)).length;
-  const sal = p.rooms.filter((r) => r.type === 'salon').length;
+  const sp = computeSpaces(p).spaces;
+  const bed = sp.reduce((n, s) => n + (s.types.some((t) => ['yatak', 'cocuk', 'calisma'].includes(t)) ? 1 : 0), 0);
+  const sal = sp.filter((s) => s.types.includes('salon')).length;
   if (!bed && !sal) return '';
   return `${bed}+${sal || 1}`;
 }
@@ -101,7 +102,8 @@ export async function buildPresentation(project, onProgress = () => {}, options 
   document.body.appendChild(holder);
   let viewer = null;
   const shots = {};
-  const roomsForShots = project.rooms.filter((r) => r.type !== 'antre' && project.furniture.some((f) => f.roomId === r.id));
+  const spaces = computeSpaces(project).spaces;
+  const roomsForShots = spaces.filter((sp) => !sp.types.every((t) => t === 'antre') && project.furniture.some((f) => sp.rooms.some((r) => r.id === f.roomId)));
   const totalSteps = 3 + roomsForShots.length + 5;
   let step = 0;
   const tick = async (msg) => { step++; onProgress(Math.min(1, step / totalSteps), msg); await new Promise((r) => setTimeout(r, 30)); };
@@ -121,8 +123,8 @@ export async function buildPresentation(project, onProgress = () => {}, options 
       if (opt.includeRooms) {
         shots.rooms = [];
         for (const r of roomsForShots) {
-          shots.rooms.push({ room: r, img: await loadImg(viewer.captureRoom(r, 1200, 800)) });
-          await tick(`${roomLabel(r)} görüntüsü`);
+          shots.rooms.push({ room: r, name: r.name, img: await loadImg(viewer.captureRoom(r, 1200, 800)) });
+          await tick(`${r.name} görüntüsü`);
         }
       }
     }
@@ -153,7 +155,7 @@ export async function buildPresentation(project, onProgress = () => {}, options 
     g.font = `400 30px ${FONT}`;
     g.fillStyle = 'rgba(255,255,255,0.85)';
     const rc = roomCountLabel(project);
-    g.fillText([rc, `${area.toFixed(1).replace('.', ',')} m² net alan`, `${project.rooms.length} mekân`].filter(Boolean).join('   ·   '), 100, 840);
+    g.fillText([rc, `${area.toFixed(1).replace('.', ',')} m² net alan`, `${spaces.length} mekân`].filter(Boolean).join('   ·   '), 100, 840);
     g.font = `400 24px ${FONT}`;
     g.fillStyle = 'rgba(255,255,255,0.65)';
     g.fillText(dateStr(), 100, PH - 90);
@@ -219,10 +221,10 @@ export async function buildPresentation(project, onProgress = () => {}, options 
         imageFrame(g, s.img, x, 220, w, h, true);
         g.fillStyle = '#111';
         g.font = `600 30px ${FONT}`;
-        g.fillText(roomLabel(s.room), x, 220 + h + 48);
+        g.fillText(s.name, x, 220 + h + 48);
         g.font = `400 24px ${FONT}`;
         g.fillStyle = '#7a7a7a';
-        g.fillText(`${fmtM(s.room.w)} × ${fmtM(s.room.h)} m   ·   ${fmtArea(roomArea(s.room))}`, x, 220 + h + 82);
+        g.fillText(s.room.rooms.length === 1 ? `${fmtM(s.room.rooms[0].w)} × ${fmtM(s.room.rooms[0].h)} m   ·   ${fmtArea(s.room.area)}` : `Birleşik açık mekân   ·   ${fmtArea(s.room.area)}`, x, 220 + h + 82);
       });
       pages.push(c);
     }
@@ -243,13 +245,14 @@ export async function buildPresentation(project, onProgress = () => {}, options 
       g.fillText(t, cx, y - 3);
     });
     y += 22;
-    const rows = project.rooms.slice().sort((a, b) => roomArea(b) - roomArea(a));
+    const rows = spaces.slice().sort((a, b) => b.area - a.area);
     const rowH = Math.min(56, (PH - 420 - y) / (rows.length + 1));
     g.font = `400 ${Math.min(24, rowH * 0.48)}px ${FONT}`;
     rows.forEach((r, k) => {
       if (k % 2 === 0) { g.fillStyle = '#f6f3ee'; g.fillRect(x, y, colW.reduce((a, b) => a + b, 0), rowH); }
       g.fillStyle = '#222';
-      const cells = [roomLabel(r), ROOM_TYPES[r.type]?.label || '', `${fmtM(r.w)} × ${fmtM(r.h)}`, fmtArea(roomArea(r))];
+      const one = r.rooms.length === 1 ? r.rooms[0] : null;
+      const cells = [r.name, r.mixed ? 'Açık plan' : ROOM_TYPES[r.type]?.label || '', one ? `${fmtM(one.w)} × ${fmtM(one.h)}` : 'Birleşik', fmtArea(r.area)];
       cells.forEach((t, i) => {
         g.textAlign = i === 3 ? 'right' : 'left';
         const cx = x + colW.slice(0, i).reduce((a, b) => a + b, 0) + (i === 3 ? colW[3] - 20 : 20);
@@ -318,7 +321,7 @@ export async function buildPresentation(project, onProgress = () => {}, options 
   });
   const images = {
     bird: shots.bird?.src, top: shots.top?.src, bird2: shots.bird2?.src,
-    rooms: (shots.rooms || []).map((r) => ({ name: roomLabel(r.room), src: r.img?.src })),
+    rooms: (shots.rooms || []).map((r) => ({ name: r.name, src: r.img?.src })),
   };
   await tick('Hazır');
   return { base64, thumbs, pageCount: pages.length, images };
