@@ -1,0 +1,53 @@
+name: APK Derle
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Web arayüzünü derle ve test et
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: İmzalama anahtarını hazırla (varsa)
+        env:
+          KEYSTORE_B64: ${{ secrets.HANTURK_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "HANTURK_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "İmzalama anahtarı tanımlı değil; APK hata ayıklama anahtarıyla imzalanacak."
+          fi
+
+      - name: APK derle
+        working-directory: android
+        env:
+          HANTURK_KEYSTORE_PASSWORD: ${{ secrets.HANTURK_KEYSTORE_PASSWORD }}
+          HANTURK_KEY_ALIAS: ${{ secrets.HANTURK_KEY_ALIAS }}
+          HANTURK_KEY_PASSWORD: ${{ secrets.HANTURK_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HanturkPlan3D-apk
+          path: android/app/build/outputs/apk/release/*.apk

@@ -1,0 +1,16 @@
+# Web
+web/node_modules/
+# Derlenen web dosyaları (build sırasında üretilir)
+android/app/src/main/assets/www/
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.iml
+# İmzalama anahtarları asla depoya eklenmez
+android/keystore.properties
+*.jks
+*.keystore
+android/.kotlin/
