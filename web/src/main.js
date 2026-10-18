@@ -707,6 +707,7 @@ function openMaterials() {
           for (const key of ['wood', 'tile', 'wall', 'furniture', 'fabric', 'accent']) st[key] = t[key];
         }) }, h('span', { class: 'dots' }, ...ACCENTS[t.accent].colors.map((c) => h('i', { style: { background: c } }))), t.label))),
         'Parke, seramik, duvar, mobilya ve kumaş renklerini uyumlu bir sette değiştirir'),
+      field('Parke (oturma, yatak odaları)', chipRow(WOOD, 'wood', 'base')),
       field('Seramik (mutfak, banyo, antre)', chipRow(TILE, 'tile', 'base')),
       field('Duvar rengi', h('div', { class: 'swatches' }, ...WALL_COLORS.map((c) => h('button', { class: `swatch ${st.wall === c ? 'on' : ''}`, style: { background: c }, onclick: () => apply(() => (st.wall = c)), 'aria-label': c })))),
       field('Mobilya tonu', chipRow(FURN_TONE, 'furniture', 'body')),
