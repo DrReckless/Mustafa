@@ -1,8 +1,16 @@
 # Beylik 🏯
 
-Anadolu'da geçen, Manor Lords tarzı **3D şehir kurma oyunu** (Android).
-Küçük bir obadan başlayıp köy, kasaba ve şehir kurarsın: kerpiç evler, cami, hamam, kervansaray,
-değirmen, tarlalar, ağıllar… Mevsimler, kış hazırlığı, vergi (öşür), Divan kararları ve ticaret var.
+Anadolu'da geçen, Manor Lords tarzı **3D şehir kurma ve strateji oyunu** (Android).
+Küçük bir obadan başlayıp Oba → Köy → Kasaba → Şehir → Sancak olarak büyür, komşu beylikleri alt edip
+Sultanlığa yükselirsin.
+
+**İçerik:** 40 bina · 3 seviyeli evler (Kerpiç → Avlulu → Kâgir Konak) · 28 kaynak · üretim zincirleri
+(buğday→un→ekmek, demir+kömür→alet, yün→elbise/kilim, kil→çömlek, üzüm→pekmez, süt→peynir) ·
+120 günlük yıl ve mevsimler · nadas ve toprak yorgunluğu · kışın yem ve odun · yiyecek bozulması ·
+alet aşınması · salgın, yangın, suç · mahalleler · pazar günü · kervanlar ve seyyar tüccar ·
+11 kanunluk kanunname · 5 komşu devletle diplomasi (haraç, ticaret, ittifak, savaş, baskınlar) ·
+4 birlik türü (azap, okçu, akıncı, tımarlı sipahi) · 10 bölgelik fetih haritası ve akınlar ·
+30 Divan olayı · 6 bölümde 32 görev · vakayiname ve istatistikler.
 
 ## Telefona kurulum
 1. `dist/Beylik.apk` dosyasını telefona indir.

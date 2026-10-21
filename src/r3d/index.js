@@ -5,6 +5,7 @@ import { loadAll, buildLibrary, M, tex, setAniso, setMaxTexSize } from './materi
 import { Terrain, MARGIN, fbm } from './terrain.js';
 import { Forest, grassTufts } from './trees.js';
 import { buildModel, buildScaffold } from './buildings.js';
+import { soldier } from './models2.js';
 import { Builder } from './geom.js';
 
 const QUALITY = {
@@ -131,7 +132,7 @@ function setGame(g) {
       const x = (rng() - 0.5) * (N + 20), z = (rng() - 0.5) * (N + 20);
       if (R.terrain.waterDistAt(x, z) < 1.1) continue;
       const ti = Math.floor(x + h), tj = Math.floor(z + h);
-      if (ti >= 0 && tj >= 0 && ti < N && tj < N && g.map.tiles[tj * N + ti] === 2) continue;
+      if (ti >= 0 && tj >= 0 && ti < N && tj < N && g.map.tiles[tj * N + ti] >= 2) continue;
       tl.push({ x, z, y: R.terrain.heightAt(x, z), s: 0.7 + rng() * 0.9, r: rng() * 6.28, ti, tj });
     }
     R.tuftList = tl;
@@ -141,7 +142,9 @@ function setGame(g) {
   // Kayalık karolara kaya
   const rb = new Builder();
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    if (g.map.tiles[j * N + i] !== 2) continue;
+    const tt = g.map.tiles[j * N + i];
+    if (tt !== 2 && tt !== 3) continue;
+    if (tt === 3) R.terrain.paint(0, i - h, j - h, i - h + 1, j - h + 1, 200, 'max', 0.3);
     const c = 1 + Math.floor(rng() * 2);
     for (let k = 0; k < c; k++) {
       const s = 0.12 + rng() * 0.22;
@@ -154,7 +157,7 @@ function setGame(g) {
         p.setXYZ(v, p.getX(v) * f, p.getY(v) * f * 0.65, p.getZ(v) * f);
       }
       geo.computeVertexNormals();
-      rb.add(geo, M.rock, i - h + 0.2 + rng() * 0.6, s * 0.15, j - h + 0.2 + rng() * 0.6, rng() * 6);
+      rb.add(geo, tt === 3 ? (M.ironRock || (M.ironRock = Object.assign(M.rock.clone(), {}), M.ironRock.color.setHex(0xb5634a), M.ironRock)) : M.rock, i - h + 0.2 + rng() * 0.6, s * 0.15, j - h + 0.2 + rng() * 0.6, rng() * 6);
     }
   }
   world.add(rb.build());
@@ -189,15 +192,16 @@ function sync(g) {
     seen.add(b.id);
     let e = R.bmap.get(b.id);
     const built = b.progress >= 1;
-    if (!e || e.built !== built) {
+    const lvl = b.level || 1;
+    if (!e || e.built !== built || e.level !== lvl) {
       if (e) R.world.remove(e.obj);
       const def = Object.assign({ key: b.type }, BUILDINGS[b.type]);
-      const obj = built ? buildModel(b.type, b.id) : buildScaffold(def);
+      const obj = built ? buildModel(b.type, b.id, { level: lvl }) : buildScaffold(def);
       const w = tileToWorld(b.i, b.j);
       obj.position.set(w.x, 0, w.z);
       R.world.add(obj);
       const isNew = !e;
-      e = { obj, built, type: b.type, b };
+      e = { obj, built, type: b.type, b, level: lvl };
       R.bmap.set(b.id, e);
       if (isNew) groundPaint(b, def);
       hideTufts(b, def);
@@ -212,15 +216,17 @@ function sync(g) {
       e.working = working;
       if (d.glow) d.glow.visible = working;
       if (d.crops) updateCrops(d.crops, b, s);
+      if (d.sheep) { const n = b.type === 'agil' ? Math.min(d.sheep.length, Math.ceil(b.sheep / 3)) : Math.min(d.sheep.length, Math.ceil((g.res.at || 0) / 2) + 1); d.sheep.forEach((sh, k) => { sh.visible = k < n; }); }
+      if (d.trees) { const k = Math.min(1, 0.45 + (b.age || 0) / YEAR_DAYS * 0.55); e.obj.children.forEach((c) => { if (c.isMesh) c.scale.y = k; }); }
     }
   }
   for (const [id, e] of R.bmap) {
     if (!seen.has(id)) {
       R.world.remove(e.obj);
       R.bmap.delete(id);
-      if (e.type === 'tarla') {
-        const w = tileToWorld(e.b.i, e.b.j);
-        R.terrain.paint(3, w.x, w.z, w.x + 2, w.z + 2, 0, 'set', 0.05);
+      if (e.type === 'tarla' || e.type === 'bostan') {
+        const w = tileToWorld(e.b.i, e.b.j), dd = BUILDINGS[e.type];
+        R.terrain.paint(3, w.x, w.z, w.x + dd.w, w.z + dd.h, 0, 'set', 0.05);
       }
     }
   }
@@ -234,10 +240,10 @@ function sync(g) {
 
 function groundPaint(b, def) {
   const w = tileToWorld(b.i, b.j);
-  if (b.type === 'tarla') {
-    R.terrain.paint(3, w.x + 0.04, w.z + 0.04, w.x + 1.96, w.z + 1.96, 255, 'max', 0.05);
-  } else if (b.type === 'agil') {
-    R.terrain.paint(0, w.x + 0.1, w.z + 0.1, w.x + 1.9, w.z + 1.9, 170, 'max', 0.3);
+  if (b.type === 'tarla' || b.type === 'bostan') {
+    R.terrain.paint(3, w.x + 0.04, w.z + 0.04, w.x + def.w - 0.04, w.z + def.h - 0.04, 255, 'max', 0.05);
+  } else if (b.type === 'agil' || b.type === 'ahir' || b.type === 'meyve' || b.type === 'bag') {
+    R.terrain.paint(0, w.x + 0.1, w.z + 0.1, w.x + def.w - 0.1, w.z + def.h - 0.1, 150, 'max', 0.3);
   } else {
     R.terrain.paint(0, w.x + 0.1, w.z + 0.1, w.x + def.w - 0.1, w.z + def.h - 0.1, 230, 'max', 0.35);
   }
@@ -254,7 +260,10 @@ function hideTufts(b, def) {
 
 function updateCrops(c, b, s) {
   let h = 0, ripe = false;
-  if (s === 0) h = 0.15 + b.growth * 0.9;
+  if (b.crop === 'nadas') { if (c.last !== -2) { c.last = -2; c.im.visible = false; } return; }
+  c.im.visible = true;
+  c.mat.color.setHex((b.harvestCrop || b.crop) === 'arpa' ? 0xd9e6a8 : 0xffffff);
+  if (s === 0) h = b.sown > 0.05 ? 0.12 + b.growth * 0.9 : 0;
   else if (s === 1) h = 0.15 + b.growth * 0.9;
   else if (s === 2) { h = b.harvest > 1 ? 1 : 0; ripe = true; }
   if (s === 1 && b.growth > 0.75) ripe = true;
@@ -265,7 +274,7 @@ function updateCrops(c, b, s) {
   c.mat.needsUpdate = true;
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   // hasatta tarlanın bir kısmı biçilmiş görünür
-  const frac = s === 2 && b.harvest > 1 ? Math.min(1, b.harvest / 40) : 1;
+  const frac = s === 2 && b.harvest > 1 ? Math.min(1, b.harvest / 80) : (s === 0 ? b.sown : 1);
   c.base.forEach(([x, z, r], n) => {
     const on = h > 0 && (n / c.base.length) < frac + 0.001;
     q.setFromAxisAngle(up, r);
@@ -426,7 +435,8 @@ function frame(dt, t, g, ui, walkers, running) {
         const u = sh.userData;
         if (u.wait > 0) { u.wait -= dt; continue; }
         const dx = u.tx - sh.position.x, dz = u.tz - sh.position.z, dd = Math.hypot(dx, dz);
-        if (dd < 0.02) { u.tx = 0.3 + Math.random() * 1.4; u.tz = 0.85 + Math.random() * 0.95; u.wait = 1 + Math.random() * 5; }
+        const bx = d.sheepBox || [0.3, 0.85, 1.7, 1.8];
+        if (dd < 0.02) { u.tx = bx[0] + Math.random() * (bx[2] - bx[0]); u.tz = bx[1] + Math.random() * (bx[3] - bx[1]); u.wait = 1 + Math.random() * 5; }
         else { sh.position.x += dx / dd * dt * 0.12; sh.position.z += dz / dd * dt * 0.12; sh.rotation.y = Math.atan2(dx, dz) - Math.PI / 2; }
       }
     }
@@ -441,7 +451,7 @@ function frame(dt, t, g, ui, walkers, running) {
       const d = e.obj.userData.dyn;
       if (!d.smoke) continue;
       const house = e.type === 'ev' || e.type === 'konak';
-      if ((house && (s === 2 || s === 3)) || (!house && e.working)) {
+      if ((house && (s === 2 || s === 3)) || (!house && e.working) || d.alwaysSmoke) {
         for (const p of d.smoke) emitSmoke(p.clone().add(e.obj.position));
       }
     }
@@ -468,8 +478,82 @@ function frame(dt, t, g, ui, walkers, running) {
     R.snow.position.set(R.cam.tx, 0, R.cam.tz);
   }
   updateWalkers(walkers, t);
+  updateFires(g, dt, running);
+  updateCaravan(g, t);
+  updateSoldiers(g);
 
   R.renderer.render(R.scene, R.camera);
+}
+
+// ---------- Yangın, kervan, askerler ----------
+function updateFires(g, dt, running) {
+  if (!R.flames) {
+    R.flames = [];
+    const fm = new THREE.SpriteMaterial({ map: tex('smoke'), color: 0xff7a1a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+    for (let k = 0; k < 40; k++) { const sp = new THREE.Sprite(fm.clone()); sp.visible = false; R.scene.add(sp); R.flames.push(sp); }
+  }
+  const fires = (g.fx || []).filter((f) => f.type === 'fire');
+  let n = 0;
+  for (const f of fires) {
+    const w = tileToWorld(f.i, f.j);
+    for (let k = 0; k < 8 && n < R.flames.length; k++, n++) {
+      const sp = R.flames[n], ph = (performance.now() / 600 + k * 0.37) % 1;
+      sp.visible = true;
+      sp.position.set(w.x + 0.3 + (k % 3) * 0.2, 0.1 + ph * 0.5, w.z + 0.3 + Math.floor(k / 3) * 0.2);
+      sp.scale.setScalar(0.25 * (1 - ph) + 0.08);
+      sp.material.opacity = 0.9 * (1 - ph);
+    }
+    if (running && Math.random() < 0.3) emitSmoke(new THREE.Vector3(w.x + 0.5, 0.5, w.z + 0.5));
+  }
+  for (; n < R.flames.length; n++) R.flames[n].visible = false;
+}
+function camel() {
+  const cb = new Builder();
+  cb.add(new THREE.SphereGeometry(0.1, 12, 8), M.camel, 0, 0.26, 0, 0, 0, 0, 1.5, 0.75, 0.8);
+  cb.add(new THREE.SphereGeometry(0.07, 10, 8), M.camel, -0.02, 0.33, 0, 0, 0, 0, 1.1, 0.9, 0.8);
+  cb.beam(M.camel, new THREE.Vector3(0.13, 0.27, 0), new THREE.Vector3(0.22, 0.42, 0), 0.025);
+  cb.add(new THREE.SphereGeometry(0.035, 8, 6), M.camel, 0.25, 0.43, 0, 0, 0, 0, 1.6, 0.9, 0.9);
+  for (const [lx, lz] of [[0.09, 0.04], [0.09, -0.04], [-0.09, 0.04], [-0.09, -0.04]]) cb.cyl(M.camel, lx, 0, lz, 0.012, 0.014, 0.22, 5);
+  cb.box(M.kilim, -0.02, 0.32, 0, 0.12, 0.02, 0.17);
+  cb.cyl(M.sack, -0.02, 0.18, 0.1, 0.035, 0.045, 0.07, 8);
+  cb.cyl(M.sack, -0.02, 0.18, -0.1, 0.035, 0.045, 0.07, 8);
+  return cb.build();
+}
+function updateCaravan(g, t) {
+  const cv = g.caravan;
+  if (!R.caravanGrp) {
+    R.caravanGrp = new THREE.Group();
+    for (let k = 0; k < 5; k++) { const c = camel(); c.position.set(-k * 0.45, 0, 0); c.userData.k = k; R.caravanGrp.add(c); }
+    R.scene.add(R.caravanGrp);
+  }
+  if (!cv) { R.caravanGrp.visible = false; return; }
+  R.caravanGrp.visible = true;
+  let a = cv.from, b = cv.to, f = cv.t;
+  if (cv.state === 'burada') f = 1;
+  if (cv.state === 'gidiyor') { a = cv.to; b = cv.from; }
+  const x = a.x + (b.x - a.x) * f, z = a.y + (b.y - a.y) * f;
+  const w = tileToWorld(x, z);
+  const dir = Math.atan2(b.y - a.y, b.x - a.x);
+  R.caravanGrp.position.set(w.x, Math.max(0, R.terrain.heightAt(w.x, w.z)), w.z);
+  R.caravanGrp.rotation.y = -dir;
+  R.caravanGrp.children.forEach((c) => { c.position.y = cv.state === 'burada' ? 0 : Math.abs(Math.sin(t * 4 + c.userData.k)) * 0.02; });
+}
+function updateSoldiers(g) {
+  const k = [...R.bmap.values()].find((e) => e.type === 'kisla' && e.built);
+  const n = Math.min(30, armySize(g));
+  const key = n + '_' + (k ? k.b.id : 0) + '_' + JSON.stringify(g.army);
+  if (key === R.soldierKey) return;
+  R.soldierKey = key;
+  if (R.soldierGrp) { R.scene.remove(R.soldierGrp); R.soldierGrp = null; }
+  if (!k || !n) return;
+  const b = new Builder();
+  const kinds = [];
+  for (const u of UNIT_KEYS) for (let i = 0; i < g.army[u]; i++) kinds.push(u);
+  for (let i = 0; i < n; i++) soldier(b, 0.9 + (i % 8) * 0.17, 1.35 + Math.floor(i / 8) * 0.2, 0, kinds[i]);
+  R.soldierGrp = b.build();
+  const w = tileToWorld(k.b.i, k.b.j);
+  R.soldierGrp.position.set(w.x, 0, w.z);
+  R.scene.add(R.soldierGrp);
 }
 
 function showRing(r, x, z) {

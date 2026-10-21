@@ -158,7 +158,10 @@ const BUILD = {
     jar(b, 1.75, 1.6); jar(b, 1.68, 1.68); barrel(b, 0.3, 0.3);
   },
 
-  ev(b, g, id) {
+  ev(b, g, id, opt) {
+    const lvl = (opt && opt.level) || 1;
+    if (lvl === 2) return evL2(b, g, id);
+    if (lvl === 3) return evL3(b, g, id);
     const r = rnd(id);
     const v = id % 3;
     const mats = [M.plaster, M.plasterWarm, M.plasterLight];
@@ -360,16 +363,17 @@ const BUILD = {
   },
 
   tarla(b, g) {
-    // çit direkleri
-    for (let k = 0; k <= 8; k++) {
-      for (const [x, z] of [[k * 0.25, 0.02], [1.98, k * 0.25], [k * 0.25, 1.98], [0.02, k * 0.25]]) b.cyl(M.woodDark, x, 0, z, 0.01, 0.012, 0.12, 5);
+    const S = 3;
+    const posts = Math.round(S * 4);
+    for (let k = 0; k <= posts; k++) {
+      const t = k / posts * S;
+      for (const [x, z] of [[t, 0.02], [S - 0.02, t], [t, S - 0.02], [0.02, t]]) b.cyl(M.woodDark, x, 0, z, 0.01, 0.012, 0.12, 5);
     }
     // korkuluk
-    b.cyl(M.woodDark, 1.5, 0, 0.5, 0.008, 0.008, 0.3, 5);
-    b.beam(M.woodDark, V(1.42, 0.24, 0.5), V(1.58, 0.24, 0.5), 0.006);
-    b.add(new THREE.SphereGeometry(0.025, 8, 6), M.sack, 1.5, 0.31, 0.5);
-    b.cyl(M.fabric[0], 1.5, 0.15, 0.5, 0.03, 0.04, 0.1, 6);
-    // ekinler (örnekli)
+    b.cyl(M.woodDark, S * 0.75, 0, S * 0.25, 0.008, 0.008, 0.3, 5);
+    b.beam(M.woodDark, V(S * 0.75 - 0.08, 0.24, S * 0.25), V(S * 0.75 + 0.08, 0.24, S * 0.25), 0.006);
+    b.add(new THREE.SphereGeometry(0.025, 8, 6), M.sack, S * 0.75, 0.31, S * 0.25);
+    b.cyl(M.fabric[0], S * 0.75, 0.15, S * 0.25, 0.03, 0.04, 0.1, 6);
     const geo = new THREE.BufferGeometry();
     const pos = [], nor = [], uv = [];
     for (let p = 0; p < 2; p++) {
@@ -383,12 +387,13 @@ const BUILD = {
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     const mat = new THREE.MeshStandardMaterial({ map: tex('wheat_green'), alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.9 });
-    const n = 10 * 10;
-    const im = new THREE.InstancedMesh(geo, mat, n);
+    const G = 15;
+    const im = new THREE.InstancedMesh(geo, mat, G * G);
     im.castShadow = true; im.receiveShadow = true;
     const r = rnd(9);
     const base = [];
-    for (let z = 0; z < 10; z++) for (let x = 0; x < 10; x++) base.push([0.12 + x * 0.19 + (r() - 0.5) * 0.04, 0.12 + z * 0.19 + (r() - 0.5) * 0.04, r() * 3]);
+    const step = (S - 0.2) / G;
+    for (let z = 0; z < G; z++) for (let x = 0; x < G; x++) base.push([0.12 + x * step + (r() - 0.5) * 0.04, 0.12 + z * step + (r() - 0.5) * 0.04, r() * 3]);
     g.crops = { im, base, mat, last: -1 };
     b.mesh(im);
   },
@@ -482,7 +487,7 @@ const BUILD = {
     g.smoke = [V(0.6, 0.6, 0.3)];
   },
 
-  dokumaci(b, g) {
+  kilimci(b, g) {
     b.box(M.stoneRough, 0.42, 0, 0.4, 0.62, 0.04, 0.55);
     b.box(M.plasterLight, 0.42, 0.04, 0.4, 0.56, 0.34, 0.48);
     roofHip(b, 0.42, 0.38, 0.4, 0.56, 0.48, 0.2, M.roof, 0.09);
@@ -556,13 +561,88 @@ const BUILD = {
   }
 };
 
-export function buildModel(type, id) {
+// Bazı modeller 2x2 çizilip büyük boyuta ölçeklenir
+const SCALE = { cami: 1.5, kervansaray: 1.5 };
+export function buildModel(type, id, opt) {
   const b = new Builder();
   const g = {};
-  BUILD[type](b, g, id || 1);
+  const fn = BUILD[type];
+  if (!fn) { console.warn('model yok', type); BUILD.depo ? BUILD.depo(b, g, id) : null; }
+  else fn(b, g, id || 1, opt || {});
   const grp = b.build();
   grp.userData.dyn = g;
+  if (SCALE[type]) {
+    const inner = new THREE.Group();
+    while (grp.children.length) inner.add(grp.children[0]);
+    inner.scale.setScalar(SCALE[type]);
+    grp.add(inner);
+    // hareketli parçaların konumları ölçeklenir
+    if (g.smoke) g.smoke = g.smoke.map((p) => p.clone().multiplyScalar(SCALE[type]));
+  }
   return grp;
+}
+export function registerModels(obj) { Object.assign(BUILD, obj); }
+export const H = { rnd, door, win, roofGable, roofHip, logPile, sack, barrel, crate, jar, rock, person };
+
+// ---- Ev seviyeleri ----
+function evL2(b, g, id) {
+  // Avlulu ev: taş zemin, beyaz badanalı çıkmalı üst kat, avlu duvarı
+  const r = rnd(id);
+  const cx = 0.46, cz = 0.42;
+  b.box(M.stoneRough, 0.5, 0, 0.5, 0.9, 0.04, 0.9);
+  // avlu duvarı
+  b.box(M.plaster, 0.06, 0.04, 0.6, 0.06, 0.2, 0.75);
+  b.box(M.plaster, 0.3, 0.04, 0.95, 0.5, 0.2, 0.06);
+  b.box(M.roof, 0.3, 0.24, 0.95, 0.54, 0.025, 0.09);
+  b.box(M.roof, 0.06, 0.24, 0.6, 0.09, 0.025, 0.79);
+  b.box(M.woodDark, 0.7, 0.04, 0.955, 0.16, 0.18, 0.03);
+  b.box(M.stoneRough, cx, 0.04, cz, 0.6, 0.24, 0.52);
+  b.box(M.white, cx + 0.02, 0.28, cz + 0.03, 0.7, 0.24, 0.6);
+  for (let k = 0; k <= 4; k++) b.box(M.woodDark, cx - 0.33 + k * 0.175, 0.28, cz + 0.335, 0.018, 0.24, 0.012);
+  for (let k = 0; k < 4; k++) b.beam(M.woodDark, V(cx - 0.28 + k * 0.18, 0.2, cz + 0.27), V(cx - 0.28 + k * 0.18, 0.28, cz + 0.32), 0.01);
+  roofHip(b, cx + 0.02, 0.52, cz + 0.03, 0.7, 0.6, 0.24, M.roof, 0.12);
+  door(b, '+z', cx - 0.15, 0.04, cz + 0.265, 0.12, 0.18, true);
+  win(b, '+z', cx + 0.1, 0.34, cz + 0.337, 0.1, 0.12);
+  win(b, '+z', cx - 0.15, 0.34, cz + 0.337, 0.1, 0.12);
+  win(b, '+x', cx + 0.375, 0.34, cz + 0.03, 0.1, 0.12);
+  b.box(M.stoneRough, cx + 0.2, 0.6, cz - 0.1, 0.06, 0.16, 0.06);
+  g.smoke = [V(cx + 0.2, 0.8, cz - 0.1)];
+  // avluda kuyu ve asma
+  b.cyl(M.stoneRough, 0.25, 0.04, 0.78, 0.05, 0.05, 0.07, 8);
+  for (const x of [0.6, 0.85]) b.cyl(M.woodDark, x, 0.04, 0.78, 0.008, 0.008, 0.26, 5);
+  b.add(new THREE.PlaneGeometry(0.3, 0.2).rotateX(-Math.PI / 2), M.fabric[1], 0.72, 0.3, 0.78);
+  if (r() < 0.5) jar(b, 0.2, 0.62);
+}
+function evL3(b, g, id) {
+  // Kâgir konak: iki katlı taş ev, ahşap çıkmalar, kiremit çatı, kapılı avlu
+  const cx = 0.48, cz = 0.4;
+  b.box(M.stoneCut, 0.5, 0, 0.5, 0.96, 0.04, 0.96);
+  b.box(M.stoneRough, 0.04, 0.04, 0.55, 0.06, 0.24, 0.85);
+  b.box(M.stoneRough, 0.25, 0.04, 0.96, 0.42, 0.24, 0.06);
+  b.box(M.stoneRough, 0.88, 0.04, 0.96, 0.18, 0.24, 0.06);
+  b.box(M.stoneCut, 0.62, 0.04, 0.96, 0.08, 0.32, 0.08);
+  b.box(M.stoneCut, 0.78, 0.04, 0.96, 0.08, 0.32, 0.08);
+  b.box(M.roof, 0.7, 0.36, 0.96, 0.26, 0.03, 0.12);
+  b.box(M.stoneCut, cx, 0.04, cz, 0.72, 0.3, 0.6);
+  b.box(M.white, cx + 0.03, 0.34, cz + 0.04, 0.82, 0.28, 0.7);
+  // çıkma (cumba)
+  b.box(M.white, cx - 0.12, 0.36, cz + 0.42, 0.3, 0.22, 0.12);
+  roofHip(b, cx - 0.12, 0.58, cz + 0.42, 0.3, 0.12, 0.06, M.roof, 0.04);
+  for (let k = 0; k < 3; k++) win(b, '+z', cx - 0.21 + k * 0.09, 0.42, cz + 0.481, 0.06, 0.12);
+  for (let k = 0; k <= 5; k++) b.box(M.woodDark, cx - 0.38 + k * 0.164, 0.34, cz + 0.392, 0.016, 0.28, 0.01);
+  for (let k = 0; k < 2; k++) win(b, '+z', cx + 0.12 + k * 0.17, 0.42, cz + 0.392, 0.09, 0.14);
+  for (let k = 0; k < 3; k++) win(b, '+x', cx + 0.442, 0.42, cz - 0.2 + k * 0.2, 0.09, 0.14);
+  win(b, '+x', cx + 0.362, 0.14, cz, 0.08, 0.1);
+  door(b, '+z', cx + 0.15, 0.04, cz + 0.302, 0.13, 0.22, true);
+  roofHip(b, cx + 0.03, 0.62, cz + 0.04, 0.82, 0.7, 0.3, M.roof, 0.14);
+  b.box(M.stoneCut, cx - 0.2, 0.75, cz - 0.15, 0.07, 0.2, 0.07);
+  b.box(M.stoneCut, cx + 0.25, 0.75, cz - 0.1, 0.07, 0.2, 0.07);
+  g.smoke = [V(cx - 0.2, 0.97, cz - 0.15)];
+  // avlu ağacı ve havuz
+  b.cyl(M.bark, 0.2, 0.04, 0.8, 0.025, 0.035, 0.3, 6);
+  b.add(new THREE.SphereGeometry(0.13, 10, 8), M.fabric[1], 0.2, 0.42, 0.8, 0, 0, 0, 1, 0.8, 1);
+  b.box(M.stoneCut, 0.45, 0.04, 0.82, 0.16, 0.04, 0.12);
+  b.box(M.waterSmall, 0.45, 0.081, 0.82, 0.12, 0.004, 0.08);
 }
 
 // İnşaat iskelesi

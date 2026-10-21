@@ -6,8 +6,8 @@ cd "$(dirname "$0")"
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/opt/android-sdk}}"
 BT="$SDK/build-tools/35.0.0"
 PLAT="$SDK/platforms/android-34/android.jar"
-VERSION_CODE="${VERSION_CODE:-3}"
-VERSION_NAME="${VERSION_NAME:-0.3}"
+VERSION_CODE="${VERSION_CODE:-4}"
+VERSION_NAME="${VERSION_NAME:-0.4}"
 
 # 1) 3D motoru paketle
 if [ -d tools/node_modules ]; then (cd tools && node build.mjs); fi

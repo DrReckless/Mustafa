@@ -1,5 +1,5 @@
 // Harita üretimi ve yardımcı fonksiyonlar
-var T_GRASS = 0, T_WATER = 1, T_STONE = 2;
+var T_GRASS = 0, T_WATER = 1, T_STONE = 2, T_IRON = 3;
 
 function makeRng(seed) {
   var s = seed >>> 0;
@@ -70,12 +70,26 @@ function generateMap(seed) {
       }
     }
   }
+  // Demir damarları (kızıl kayalık): uzakta
+  var irons = 3;
+  for (var b2 = 0; b2 < irons; b2++) {
+    var ang2 = rng() * Math.PI * 2, dist2 = 16 + rng() * 10;
+    var ix = Math.round(c + Math.cos(ang2) * dist2), iy = Math.round(c + Math.sin(ang2) * dist2);
+    for (var j3 = -2; j3 <= 2; j3++) for (var i3 = -2; i3 <= 2; i3++) {
+      var tx2 = ix + i3, ty2 = iy + j3;
+      if (tx2 < 1 || ty2 < 1 || tx2 >= N - 1 || ty2 >= N - 1) continue;
+      if (Math.hypot(i3, j3) <= 1.6) {
+        var k5 = ty2 * N + tx2;
+        if (tiles[k5] !== T_WATER) { tiles[k5] = T_IRON; trees[k5] = 0; }
+      }
+    }
+  }
   // Başlangıç alanını temizle
   for (var j2 = 0; j2 < N; j2++) for (var i2 = 0; i2 < N; i2++) {
-    if (Math.hypot(i2 - c, j2 - c) < 5) {
+    if (Math.hypot(i2 - c, j2 - c) < 6) {
       var k3 = j2 * N + i2;
       trees[k3] = 0;
-      if (tiles[k3] === T_STONE) tiles[k3] = T_GRASS;
+      if (tiles[k3] === T_STONE || tiles[k3] === T_IRON) tiles[k3] = T_GRASS;
     }
   }
   return { tiles: tiles, trees: trees, fert: fert };
