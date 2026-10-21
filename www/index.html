@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Beylik</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="top">
+  <div id="res"></div>
+  <div id="stat">
+    <div id="date" class="pill"></div>
+    <div id="popbox" class="pill"></div>
+    <div id="speed">
+      <button data-s="0">⏸</button><button data-s="1">▶</button><button data-s="2">⏩</button><button data-s="4">⏭</button>
+    </div>
+    <button id="rotL" class="iconbtn sm">⟲</button><button id="rotR" class="iconbtn sm">⟳</button>
+    <button id="menuBtn" class="iconbtn">☰</button>
+  </div>
+</div>
+<div id="quest"></div>
+
+<div id="bottom">
+  <div id="tabs"></div>
+  <div id="cards"></div>
+</div>
+
+<div id="placebar" class="hidden">
+  <span id="placeinfo"></span>
+  <button id="placeOk" class="btn ok">İnşa Et</button>
+  <button id="placeCancel" class="btn">✕</button>
+</div>
+
+<div id="panel" class="hidden"></div>
+<div id="modal" class="hidden"><div id="modalBox"></div></div>
+<div id="toasts"></div>
+
+<script src="js/data.js"></script>
+<script src="js/world.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/game3d.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
