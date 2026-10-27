@@ -95,6 +95,7 @@ dependencies {
     ksp("androidx.room:room-compiler:2.7.1")
 
     implementation("org.osmdroid:osmdroid-android:6.1.20")
+    implementation("androidx.exifinterface:exifinterface:1.4.1")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")

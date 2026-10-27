@@ -129,6 +129,7 @@ fun BuildingDetail(id: Long) {
                     scope.launch(Dispatchers.Main.immediate) { dao.update(item.copy(status = s, updatedAt = System.currentTimeMillis())) }
                 }
             }
+            BuildingPhotos(item)
             InfoCard {
                 InfoRow("Tür", item.buildingType)
                 InfoRow("Site / Proje", item.siteName)

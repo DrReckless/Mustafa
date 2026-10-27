@@ -251,7 +251,7 @@ fun SettingsScreen() {
     }
 
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { canNotify = it }
-    val backupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+    val backupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) scope.launch(Dispatchers.Main.immediate) {
             try { Backup.export(ctx, uri); Act.toast(ctx, "Yedek kaydedildi") } catch (e: Exception) { Act.toast(ctx, "Yedeklenemedi: ${e.message}") }
         }
@@ -298,13 +298,13 @@ fun SettingsScreen() {
             InfoCard {
                 Text("Yedekleme", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                 Text(
-                    "Tüm kayıtlarınız yalnızca bu telefonda saklanır. Telefon değiştirirken veya düzenli olarak yedek alın " +
+                    "Tüm kayıtlarınız ve bina fotoğraflarınız yalnızca bu telefonda saklanır. Yedek, kayıtları ve fotoğrafları tek bir ZIP dosyasına koyar. Telefon değiştirirken veya düzenli olarak yedek alın " +
                         "(Google Drive, WhatsApp veya bilgisayara kaydedebilirsiniz).",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Button(onClick = {
                     val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
-                    backupLauncher.launch("emlak_takip_yedek_$stamp.db")
+                    backupLauncher.launch("emlak_takip_yedek_$stamp.zip")
                 }, modifier = Modifier.fillMaxWidth()) { Text("Yedek al") }
                 OutlinedButton(onClick = { restoreLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
                     Text("Yedekten geri yükle")

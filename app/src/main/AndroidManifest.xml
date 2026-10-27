@@ -12,6 +12,10 @@
         android:name="android.permission.SCHEDULE_EXACT_ALARM"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Fotoğrafları galeriye indirmek için (yalnızca Android 9 ve altı) -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <application
         android:name=".EmlakApp"
@@ -49,6 +53,17 @@
                 <data android:mimeType="application/vnd.google-earth.kmz" />
             </intent-filter>
         </activity>
+
+        <!-- Kamera ve paylaşım için fotoğraf dosyalarına güvenli erişim -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <receiver android:name=".notify.TaskAlarmReceiver" android:exported="false" />
         <receiver android:name=".notify.TaskActionReceiver" android:exported="false" />

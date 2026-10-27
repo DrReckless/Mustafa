@@ -32,11 +32,14 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AppFlowTest {
-    @get:Rule
-    val rule = createAndroidComposeRule<MainActivity>()
+    // Uygulama açılmadan önce önceki testten kalan veritabanı bağlantısını kapat
+    @get:Rule(order = 0)
+    val resetDb = object : org.junit.rules.ExternalResource() {
+        override fun before() = AppDatabase.closeAndReset()
+    }
 
-    @org.junit.After
-    fun tearDown() = AppDatabase.closeAndReset()
+    @get:Rule(order = 1)
+    val rule = createAndroidComposeRule<MainActivity>()
 
     private fun dao() = AppDatabase.get(ApplicationProvider.getApplicationContext()).dao()
 
@@ -173,9 +176,18 @@ class AppFlowTest {
         runBlocking {
             dao().importLayer(KmlLayer(name = "Test"), listOf(Building(name = "Gül Apt.", lat = 41.0, lon = 29.0, coords = "29.0,41.0")))
         }
+        runBlocking {
+            val f = java.io.File(ApplicationProvider.getApplicationContext<android.content.Context>().cacheDir, "p.png")
+            f.outputStream().use { android.graphics.Bitmap.createBitmap(40, 30, android.graphics.Bitmap.Config.ARGB_8888).compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            com.mustafa.emlaktakip.util.Photos.importUri(ApplicationProvider.getApplicationContext(), dao(), android.net.Uri.fromFile(f), 1)
+            dao().update(dao().photosByBuilding(1).first().single().copy(caption = "Giriş kapısı"))
+        }
         click("Binalar")
         waitText("Gül Apt.")
         clickNoScroll("Gül Apt.")
+        waitText("Fotoğraflar (1)")
+        waitText("Tümünü indir")
+        waitText("Giriş kapısı")
         waitText("Güvenlik / Kapıcı / Yönetici")
         click("Kişi ekle")
         type("Ad Soyad", "Veli Kapıcı")

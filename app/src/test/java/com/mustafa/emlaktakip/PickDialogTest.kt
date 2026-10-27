@@ -61,6 +61,6 @@ class RecordPickerTest {
         rule.onNodeWithText("Seçilen: 1").assertExists()
     }
 
-    @org.junit.After
-    fun tearDown() = com.mustafa.emlaktakip.data.AppDatabase.closeAndReset()
+    @org.junit.Before
+    fun resetDb() = com.mustafa.emlaktakip.data.AppDatabase.closeAndReset()
 }

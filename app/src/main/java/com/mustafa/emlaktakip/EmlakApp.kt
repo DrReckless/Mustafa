@@ -1,7 +1,9 @@
 package com.mustafa.emlaktakip
 
 import android.app.Application
+import com.mustafa.emlaktakip.data.AppDatabase
 import com.mustafa.emlaktakip.notify.Alarms
+import com.mustafa.emlaktakip.util.Photos
 import com.mustafa.emlaktakip.notify.Notifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,5 +24,8 @@ class EmlakApp : Application() {
             osmdroidTileCache = File(cacheDir, "osmdroid-tiles")
         }
         appScope.launch { Alarms.rescheduleAll(this@EmlakApp) }
+        appScope.launch {
+            runCatching { Photos.cleanOrphans(this@EmlakApp, AppDatabase.get(this@EmlakApp).dao()) }
+        }
     }
 }

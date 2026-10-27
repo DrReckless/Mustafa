@@ -199,3 +199,13 @@ data class TaskItem(
 
 /** Arama ve seçim listeleri için ortak satır */
 data class PickItem(val type: LinkType, val id: Long, val title: String, val subtitle: String = "")
+
+/** Binaya ait fotoğraf. Dosya, uygulamanın kendi klasöründe (files/photos) durur. */
+@Entity(tableName = "building_photos", indices = [Index("buildingId")])
+data class BuildingPhoto(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val buildingId: Long,
+    val fileName: String,
+    val caption: String = "",
+    val createdAt: Long = now(),
+)

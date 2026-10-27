@@ -132,6 +132,19 @@ interface AppDao {
     @Update suspend fun update(item: BuildingContact)
     @Delete suspend fun delete(item: BuildingContact)
 
+    // ---------- Bina fotoğrafları ----------
+    @Query("SELECT * FROM building_photos WHERE buildingId = :buildingId ORDER BY createdAt")
+    fun photosByBuilding(buildingId: Long): Flow<List<BuildingPhoto>>
+    @Query("SELECT COUNT(*) FROM building_photos WHERE buildingId = :buildingId")
+    fun photoCount(buildingId: Long): Flow<Int>
+    @Query("SELECT fileName FROM building_photos")
+    suspend fun allPhotoFileNames(): List<String>
+    @Insert suspend fun insert(item: BuildingPhoto): Long
+    @Update suspend fun update(item: BuildingPhoto)
+    @Delete suspend fun delete(item: BuildingPhoto)
+    @Query("DELETE FROM building_photos WHERE buildingId = :buildingId")
+    suspend fun deletePhotosForBuilding(buildingId: Long)
+
     // ---------- Görevler ----------
     @Query("SELECT * FROM tasks WHERE done = 0 ORDER BY CASE WHEN dueAt IS NULL THEN 1 ELSE 0 END, dueAt, priority DESC")
     fun openTasks(): Flow<List<TaskItem>>
@@ -231,6 +244,7 @@ interface AppDao {
         unlinkBuildingFromLands(item.id)
         unlinkBuildingFromContacts(item.id, item.name)
         unlinkTasks(LinkType.BUILDING.name, item.id)
+        deletePhotosForBuilding(item.id) // dosyalar açılışta temizlenir
         delete(item)
     }
 

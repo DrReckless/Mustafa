@@ -372,6 +372,7 @@ private fun SelectedBuildingCard(b: Building, onClose: () -> Unit, modifier: Mod
     val dao = LocalDao.current
     val scope = rememberCoroutineScope()
     val contacts by rememberFlow(b.id, emptyList()) { dao.contactsByBuilding(b.id) }
+    val photoCount by rememberFlow("pc-${b.id}", 0) { dao.photoCount(b.id) }
     Card(
         modifier = modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
@@ -383,7 +384,7 @@ private fun SelectedBuildingCard(b: Building, onClose: () -> Unit, modifier: Mod
                 StatusPill(Options.buildingStatus.labelOf(b.status), Options.buildingStatus.colorOf(b.status))
                 IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Kapat") }
             }
-            val sub = buildingSubtitle(b)
+            val sub = listOf(buildingSubtitle(b), if (photoCount > 0) "📷 $photoCount fotoğraf" else "").filter { it.isNotBlank() }.joinToString(" · ")
             if (sub.isNotBlank()) Text(sub, style = MaterialTheme.typography.bodySmall, maxLines = 2)
             if (contacts.isNotEmpty()) Text(
                 contacts.joinToString(" · ") { "${Options.contactRole.labelOf(it.role)}: ${it.name}" },
@@ -399,7 +400,7 @@ private fun SelectedBuildingCard(b: Building, onClose: () -> Unit, modifier: Mod
                 }
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { nav.navigate(Routes.detail(LinkType.BUILDING, b.id)) }) { Text("Detay") }
+                TextButton(onClick = { nav.navigate(Routes.detail(LinkType.BUILDING, b.id)) }) { Text("Detay / Fotoğraf") }
                 TextButton(onClick = { nav.navigate(Routes.edit(LinkType.BUILDING, b.id)) }) { Text("Bilgi gir") }
                 TextButton(onClick = { nav.navigate(Routes.edit(LinkType.CONTACT, 0, "&buildingId=${b.id}")) }) { Text("Kişi ekle") }
                 TextButton(onClick = { nav.navigate(Routes.task(0, LinkType.BUILDING, b.id)) }) { Text("Görev") }
