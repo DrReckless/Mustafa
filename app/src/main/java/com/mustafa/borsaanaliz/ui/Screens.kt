@@ -181,11 +181,14 @@ private fun MarketScreen(st: UiState, vm: MainViewModel) {
                 }
             }
         }
-        if (st.stocks.isNotEmpty()) {
+        if (st.scan.isNotEmpty()) {
             item {
-                SectionCard("Günün Öne Çıkanları") {
-                    val best = st.stocks.take(3)
-                    val worst = st.stocks.takeLast(3).reversed().filter { it !in best }
+                SectionCard("Günün Öne Çıkanları (${st.scan.size} hisse tarandı, ${timeStr(st.lastScan)})") {
+                    val best = st.scan.take(5)
+                    val worst = st.scan.takeLast(5).reversed().filter { it !in best }
+                    val buys = st.scan.count { it.signal.isBuy }; val sells = st.scan.count { it.signal.isSell }
+                    Text("AL: $buys  ·  TUT: ${st.scan.size - buys - sells}  ·  SAT: $sells", fontSize = 12.sp, color = Palette.Gray)
+                    Spacer(Modifier.height(6.dp))
                     Text("En güçlü sinyaller", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     best.forEach { MiniRow(it) { vm.openDetail(it.quote.instrument) } }
                     if (worst.isNotEmpty()) {
@@ -252,31 +255,56 @@ private fun InstrumentRow(a: Analysis, onClick: () -> Unit) {
 @Composable
 private fun SignalsScreen(st: UiState, vm: MainViewModel) {
     var input by remember { mutableStateOf("") }
+    var showScan by remember { mutableStateOf(true) }
+    var filter by remember { mutableIntStateOf(0) } // 0 tümü, 1 al, 2 sat
+    val base = if (showScan) st.scan else st.stocks
+    val list = when (filter) {
+        1 -> base.filter { it.signal.isBuy }
+        2 -> base.filter { it.signal.isSell }.reversed()
+        else -> base
+    }
     LazyColumn(contentPadding = PaddingValues(vertical = 6.dp)) {
         item {
             SectionCard("Günlük İşlem Tavsiyeleri") {
-                Text("İzleme listenizdeki hisseler teknik (%60), temel (%30) ve haber (%12) skorlarına göre sıralanır.",
+                Text("Her yenilemede BIST 100'ün tamamı ve izleme listeniz yeniden çekilip analiz edilir. " +
+                    "Sıralama teknik (%60), temel (%30) ve haber (%12) skoruna göredir.",
+                    fontSize = 12.sp, color = Palette.Gray)
+                if (st.lastScan > 0) Text("Son tarama ${timeStr(st.lastScan)} · ${st.scan.size}/${st.scanTotal} hisse verisi alındı",
                     fontSize = 12.sp, color = Palette.Gray)
                 Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = input, onValueChange = { input = it.uppercase() }, singleLine = true,
-                        label = { Text("Hisse kodu ekle (örn. SASA)") }, modifier = Modifier.weight(1f),
-                    )
-                    IconButton(onClick = { vm.addToWatchlist(input); input = "" }) { Icon(Icons.Filled.Add, "Ekle") }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(selected = showScan, onClick = { showScan = true }, label = { Text("BIST 100 taraması") })
+                    FilterChip(selected = !showScan, onClick = { showScan = false }, label = { Text("İzleme listem") })
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("Tümü", "Al sinyalleri", "Sat sinyalleri").forEachIndexed { i, l ->
+                        FilterChip(selected = filter == i, onClick = { filter = i }, label = { Text(l, fontSize = 12.sp) })
+                    }
+                }
+                if (!showScan) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = input, onValueChange = { input = it.uppercase() }, singleLine = true,
+                            label = { Text("Hisse kodu ekle (örn. SASA)") }, modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { vm.addToWatchlist(input); input = "" }) { Icon(Icons.Filled.Add, "Ekle") }
+                    }
                 }
             }
         }
-        items(st.stocks, key = { it.quote.instrument.symbol }) { a ->
+        if (list.isEmpty()) item {
+            Text(if (st.loading) "Hisseler taranıyor..." else "Bu filtrede hisse yok.", color = Palette.Gray, modifier = Modifier.padding(16.dp))
+        }
+        items(list, key = { it.quote.instrument.symbol }) { a ->
             SignalRow(a, onClick = { vm.openDetail(a.quote.instrument) },
-                onRemove = { vm.removeFromWatchlist(a.quote.instrument.symbol.removeSuffix(".IS")) })
+                onRemove = if (showScan) null else { { vm.removeFromWatchlist(a.quote.instrument.symbol.removeSuffix(".IS")) } })
         }
         item { Text(DISCLAIMER, fontSize = 11.sp, color = Palette.Gray, modifier = Modifier.padding(16.dp)) }
     }
 }
 
 @Composable
-private fun SignalRow(a: Analysis, onClick: () -> Unit, onRemove: () -> Unit) {
+private fun SignalRow(a: Analysis, onClick: () -> Unit, onRemove: (() -> Unit)?) {
     SectionCard(modifier = Modifier.clickable(onClick = onClick)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -289,7 +317,7 @@ private fun SignalRow(a: Analysis, onClick: () -> Unit, onRemove: () -> Unit) {
             }
             Spacer(Modifier.width(8.dp))
             SignalChip(a.signal)
-            IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Kaldır", tint = Palette.Gray) }
+            if (onRemove != null) IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Kaldır", tint = Palette.Gray) }
         }
         ScoreBar(a.score, Modifier.padding(top = 6.dp))
         if (a.signal.isBuy && a.stopLoss != null) {

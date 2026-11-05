@@ -106,9 +106,9 @@ class MonitorWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                     mr.reasons.take(3).joinToString("\n• ", prefix = "• "))
             }
 
-            // 4) Güçlü al sinyalleri (izleme listesi)
+            // 4) Güçlü al sinyalleri (BIST 100 + izleme listesi taraması)
             if (s.notifyBuySignals && weekday && hour in 10..17) {
-                val list = Repository.analyzeAll(prefs.watchlist().map { Universe.stock(it) }, withFundamentals = false, maxAgeMs = 60_000)
+                val list = Repository.analyzeAll((Universe.bist100 + prefs.watchlist()).distinct().map { Universe.stock(it) }, withFundamentals = false, maxAgeMs = 60_000)
                 list.filter { it.signal == Signal.STRONG_BUY }.forEach { a ->
                     if (prefs.markNotified("buy_${a.quote.instrument.symbol}", day)) {
                         Notifier.send(ctx, nid++, Notifier.CH_SIGNAL, "${Universe.displayCode(a.quote.instrument)}: GÜÇLÜ AL sinyali",

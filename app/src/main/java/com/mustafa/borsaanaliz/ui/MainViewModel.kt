@@ -28,7 +28,10 @@ import kotlinx.coroutines.launch
 data class UiState(
     val loading: Boolean = false,
     val markets: List<Analysis> = emptyList(),
-    val stocks: List<Analysis> = emptyList(),
+    val stocks: List<Analysis> = emptyList(), // izleme listesi
+    val scan: List<Analysis> = emptyList(), // BIST 100 + izleme listesi taraması
+    val scanTotal: Int = 0,
+    val lastScan: Long = 0,
     val marketRisk: MarketRisk? = null,
     val news: List<NewsItem> = emptyList(),
     val watchlist: List<String> = emptyList(),
@@ -88,16 +91,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val risk = Analyzer.marketRisk(quotes, news)
             _state.update { it.copy(news = news, marketRisk = risk) }
 
-            val stocks = Repository.analyzeAll(prefs.watchlist().map { Universe.stock(it) }, withFundamentals = true, maxAgeMs = maxAge)
-                .sortedByDescending { it.score }
+            // Hisse taraması ağır olduğundan otomatik yenilemede en fazla 5 dakikada bir yapılır.
+            if (full || System.currentTimeMillis() - _state.value.lastScan > 5 * 60_000L) scanStocks(maxAge)
             val posQuotes = Repository.quotes(prefs.positions().map { Universe.find(it.symbol) }, maxAge.coerceAtLeast(10_000))
             _state.update {
                 it.copy(
-                    loading = false, stocks = stocks, positionQuotes = posQuotes,
+                    loading = false, positionQuotes = posQuotes,
                     lastUpdate = System.currentTimeMillis(),
-                    error = if (markets.isEmpty() && stocks.isEmpty()) "Veri alınamadı. İnternet bağlantınızı kontrol edin." else null,
+                    error = if (markets.isEmpty() && it.scan.isEmpty()) "Veri alınamadı. İnternet bağlantınızı kontrol edin." else null,
                 )
             }
+        }
+    }
+
+    /**
+     * Tüm BIST 100 + izleme listesini yeniden çeker ve teknik analizden geçirir; ardından
+     * en güçlü/zayıf adaylar ile izleme listesi için temel analiz eklenir.
+     */
+    private suspend fun scanStocks(maxAge: Long) {
+        val watch = prefs.watchlist()
+        val codes = (Universe.bist100 + watch).distinct()
+        val tech = Repository.analyzeAll(codes.map { Universe.stock(it) }, withFundamentals = false, maxAgeMs = maxAge)
+            .sortedByDescending { it.score }
+        val deepSymbols = (tech.take(20) + tech.takeLast(10)).map { it.quote.instrument.symbol }.toSet() +
+            watch.map { Universe.stock(it).symbol }
+        val deep = Repository.analyzeAll(
+            tech.filter { it.quote.instrument.symbol in deepSymbols }.map { it.quote.instrument },
+            withFundamentals = true, maxAgeMs = Long.MAX_VALUE,
+        ).associateBy { it.quote.instrument.symbol }
+        val scan = tech.map { deep[it.quote.instrument.symbol] ?: it }.sortedByDescending { it.score }
+        val watchSet = watch.map { Universe.stock(it).symbol }.toSet()
+        _state.update {
+            it.copy(
+                scan = scan, scanTotal = codes.size, lastScan = System.currentTimeMillis(),
+                stocks = scan.filter { a -> a.quote.instrument.symbol in watchSet },
+            )
         }
     }
 
@@ -120,7 +148,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(watchlist = list) }
         viewModelScope.launch {
             Repository.analyze(Universe.stock(c), withNews = false)?.let { a ->
-                _state.update { st -> st.copy(stocks = (st.stocks.filter { it.quote.instrument.symbol != a.quote.instrument.symbol } + a).sortedByDescending { it.score }) }
+                _state.update { st ->
+                    st.copy(
+                        stocks = (st.stocks.filter { it.quote.instrument.symbol != a.quote.instrument.symbol } + a).sortedByDescending { it.score },
+                        scan = (st.scan.filter { it.quote.instrument.symbol != a.quote.instrument.symbol } + a).sortedByDescending { it.score },
+                    )
+                }
             }
         }
     }

@@ -104,6 +104,18 @@ object Universe {
         "KCHOL", "SAHOL", "SISE", "TUPRS", "FROTO", "TOASO", "PGSUS", "TCELL", "ARCLK", "KRDMD",
     )
 
+    /** Taranan hisse evreni: BIST 100 bileşenleri (dönemsel değişebilir; geçersiz kodlar sessizce atlanır). */
+    val bist100 = listOf(
+        "AEFES", "AGHOL", "AHGAZ", "AKBNK", "AKSA", "AKSEN", "ALARK", "ALFAS", "ALTNY", "ANSGR", "ARCLK", "ASELS",
+        "ASTOR", "BERA", "BIMAS", "BRSAN", "BRYAT", "BSOKE", "BTCIM", "CANTE", "CCOLA", "CIMSA", "CLEBI", "CWENE",
+        "DOAS", "DOHOL", "ECILC", "EGEEN", "EKGYO", "ENERY", "ENJSA", "ENKAI", "EREGL", "EUPWR", "FENER", "FROTO",
+        "GARAN", "GESAN", "GOLTS", "GRSEL", "GUBRF", "HALKB", "HEKTS", "ISCTR", "ISMEN", "IZENR", "KCAER", "KCHOL",
+        "KONTR", "TRALT", "TRMET", "KRDMD", "KTLEV", "LMKDC", "MAGEN", "MAVI", "MGROS", "MIATK", "MPARK", "OBAMS",
+        "ODAS", "OTKAR", "OYAKC", "PASEU", "PETKM", "PGSUS", "QUAGR", "RALYH", "REEDR", "SAHOL", "SASA", "SELEC",
+        "SISE", "SKBNK", "SMRTG", "SOKM", "TABGD", "TAVHL", "TCELL", "THYAO", "TKFEN", "TMSN", "TOASO", "TSKB",
+        "TTKOM", "TTRAK", "TUKAS", "TUPRS", "TURSG", "ULKER", "VAKBN", "VESBE", "VESTL", "YEOTK", "YKBNK", "ZOREN",
+    )
+
     private val stockNames = mapOf(
         "THYAO" to "Türk Hava Yolları", "ASELS" to "Aselsan", "GARAN" to "Garanti BBVA",
         "AKBNK" to "Akbank", "YKBNK" to "Yapı Kredi", "ISCTR" to "İş Bankası",
@@ -112,7 +124,7 @@ object Universe {
         "FROTO" to "Ford Otosan", "TOASO" to "Tofaş", "PGSUS" to "Pegasus",
         "TCELL" to "Turkcell", "ARCLK" to "Arçelik", "KRDMD" to "Kardemir",
         "HEKTS" to "Hektaş", "SASA" to "Sasa", "PETKM" to "Petkim", "TTKOM" to "Türk Telekom",
-        "ENKAI" to "Enka", "KOZAL" to "Koza Altın", "VESTL" to "Vestel", "ULKER" to "Ülker",
+        "ENKAI" to "Enka", "TRALT" to "Türk Altın (eski KOZAL)", "VESTL" to "Vestel", "ULKER" to "Ülker",
         "MGROS" to "Migros", "AEFES" to "Anadolu Efes", "TAVHL" to "TAV Havalimanları",
         "VAKBN" to "Vakıfbank", "HALKB" to "Halkbank", "ASTOR" to "Astor Enerji",
     )
