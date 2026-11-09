@@ -20,6 +20,10 @@ piyasa risk analizi, ekonomi haberleri duygu analizi ve acil durum bildirimleri 
 - **Teknik analiz**: RSI, MACD, SMA 20/50/200 (altın/ölüm kesişimi), Bollinger, Stokastik, ATR, hacim, destek/direnç.
 - **Temel analiz**: F/K, PD/DD, özsermaye kârlılığı, kâr marjı, borçluluk, büyüme, temettü.
 - **Risk**: yıllık oynaklık, maksimum düşüş, günlük VaR %95, BIST 100'e göre beta.
+- **Kripto**: Her yenilemede CoinGecko'dan piyasa değerine göre güncel ilk 100 coin (stablecoinler hariç)
+  + kullanıcının eklediği coinler çekilir; Binance günlük mumlarıyla teknik analiz yapılır (yoksa Yahoo).
+  Kripto risk kartı: Korku ve Açgözlülük Endeksi, Bitcoin trendi/oynaklığı, piyasa genişliği, haber tonu.
+  Fiyatlar dolar ve yaklaşık TL karşılığıyla gösterilir.
 - **Haberler**: Google Haberler + AA ekonomi RSS; başlıklar olumlu/olumsuz/nötr olarak puanlanır.
 - **Portföy & bildirimler** (15/30/60 dk'da bir arka planda kontrol):
   - Fiyat stop seviyesinin altına inince **ACİL SAT** uyarısı

@@ -1,7 +1,7 @@
 package com.mustafa.borsaanaliz.data
 
 enum class AssetType(val label: String) {
-    INDEX("Endeks"), FX("Döviz"), COMMODITY("Emtia"), STOCK("Hisse"), GLOBAL("Küresel")
+    INDEX("Endeks"), FX("Döviz"), COMMODITY("Emtia"), STOCK("Hisse"), GLOBAL("Küresel"), CRYPTO("Kripto")
 }
 
 data class Instrument(
@@ -73,6 +73,7 @@ data class Settings(
     val autoStopPct: Double = 8.0,
     val autoTargetPct: Double = 20.0,
     val dailyDropAlertPct: Double = 5.0,
+    val cryptoDropAlertPct: Double = 8.0,
     val notifySellSignals: Boolean = true,
     val notifyBuySignals: Boolean = false,
     val notifyMarketRisk: Boolean = true,
@@ -94,7 +95,6 @@ object Universe {
         Instrument("CL=F", "WTI Petrol ($)", AssetType.COMMODITY),
         Instrument("^GSPC", "S&P 500", AssetType.GLOBAL),
         Instrument("^VIX", "VIX Korku Endeksi", AssetType.GLOBAL),
-        Instrument("BTC-USD", "Bitcoin ($)", AssetType.GLOBAL),
     )
 
     const val GRAM_GOLD = "GRAMALTIN"
@@ -134,22 +134,53 @@ object Universe {
         return Instrument("$c.IS", stockNames[c] ?: c, AssetType.STOCK)
     }
 
+    /** Kripto: sembol "BTC-USD" biçiminde saklanır. */
+    fun crypto(code: String, name: String? = null): Instrument {
+        val c = code.uppercase(java.util.Locale.ROOT).removeSuffix("-USD").trim()
+        return Instrument("$c-USD", name ?: CryptoNames.get(c) ?: c, AssetType.CRYPTO)
+    }
+
     fun find(symbol: String): Instrument =
-        markets.firstOrNull { it.symbol == symbol } ?: stock(symbol)
+        markets.firstOrNull { it.symbol == symbol }
+            ?: if (symbol.endsWith("-USD")) crypto(symbol) else stock(symbol)
 
     /** Kullanıcı girdisini sembole çevirir: "thyao" -> THYAO.IS, "dolar" -> USDTRY=X */
     fun resolve(input: String): Instrument {
-        val t = input.trim().uppercase(java.util.Locale("tr"))
+        val t = input.trim().uppercase(java.util.Locale.ROOT)
         val alias = mapOf(
             "DOLAR" to "USDTRY=X", "USD" to "USDTRY=X", "EURO" to "EURTRY=X", "EUR" to "EURTRY=X",
             "ALTIN" to GRAM_GOLD, "GRAM ALTIN" to GRAM_GOLD, "ONS" to "GC=F", "GÜMÜŞ" to "SI=F",
-            "PETROL" to "BZ=F", "BRENT" to "BZ=F", "BIST" to "XU100.IS", "BIST100" to "XU100.IS", "BITCOIN" to "BTC-USD",
+            "PETROL" to "BZ=F", "BRENT" to "BZ=F", "BIST" to "XU100.IS", "BIST100" to "XU100.IS",
         )
         alias[t]?.let { return find(it) }
+        if (t == "BITCOIN") return crypto("BTC")
+        if (t == "ETHEREUM") return crypto("ETH")
+        if (t.endsWith("-USD") || CryptoNames.isKnown(t)) return crypto(t)
         markets.firstOrNull { it.symbol.equals(t, true) }?.let { return it }
         return stock(t)
     }
 
-    fun displayCode(i: Instrument) =
-        if (i.type == AssetType.STOCK) i.symbol.removeSuffix(".IS") else i.name
+    fun displayCode(i: Instrument) = when (i.type) {
+        AssetType.STOCK -> i.symbol.removeSuffix(".IS")
+        AssetType.CRYPTO -> i.symbol.removeSuffix("-USD")
+        else -> i.name
+    }
+}
+
+/** Coin adları: CoinGecko listesinden doldurulur; uygulama ilk açılışta da tanısın diye çekirdek liste içerir. */
+object CryptoNames {
+    private val names = java.util.concurrent.ConcurrentHashMap(
+        mapOf(
+            "BTC" to "Bitcoin", "ETH" to "Ethereum", "BNB" to "BNB", "XRP" to "XRP", "SOL" to "Solana",
+            "TRX" to "TRON", "DOGE" to "Dogecoin", "ADA" to "Cardano", "LINK" to "Chainlink", "XLM" to "Stellar",
+            "BCH" to "Bitcoin Cash", "AVAX" to "Avalanche", "SUI" to "Sui", "LTC" to "Litecoin", "DOT" to "Polkadot",
+            "SHIB" to "Shiba Inu", "UNI" to "Uniswap", "NEAR" to "NEAR", "PEPE" to "Pepe", "AAVE" to "Aave",
+            "POL" to "Polygon", "ATOM" to "Cosmos", "ETC" to "Ethereum Classic", "HBAR" to "Hedera", "APT" to "Aptos",
+            "ARB" to "Arbitrum", "FIL" to "Filecoin", "XMR" to "Monero", "TON" to "Toncoin", "RENDER" to "Render",
+        )
+    )
+
+    fun get(code: String): String? = names[code]
+    fun isKnown(code: String) = names.containsKey(code)
+    fun put(code: String, name: String) { names[code] = name }
 }

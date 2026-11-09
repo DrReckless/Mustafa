@@ -22,7 +22,11 @@ object Repository {
     suspend fun quote(i: Instrument, maxAgeMs: Long = 30_000): Quote? = withContext(Dispatchers.IO) {
         quoteCache[i.symbol]?.let { if (System.currentTimeMillis() - it.updatedAt < maxAgeMs) return@withContext it }
         val q = runCatching {
-            if (i.symbol == Universe.GRAM_GOLD) gramGold(i) else gate.withPermit { fetchQuote(i) }
+            when {
+                i.symbol == Universe.GRAM_GOLD -> gramGold(i)
+                i.type == AssetType.CRYPTO -> gate.withPermit { fetchCrypto(i) }
+                else -> gate.withPermit { fetchQuote(i) }
+            }
         }.getOrNull()
         if (q != null) quoteCache[i.symbol] = q
         q ?: quoteCache[i.symbol]
@@ -38,6 +42,25 @@ object Repository {
         val prev = if (list.size >= 2) list[list.size - 2].close else live
         return Quote(i, list, live, prev, meta.optString("currency", ""), System.currentTimeMillis())
     }
+
+    private fun fetchCrypto(i: Instrument): Quote? {
+        val code = i.symbol.removeSuffix("-USD")
+        val (candles, _) = CryptoClient.history(code, CryptoNames.get(code)) ?: return null
+        val prev = candles[candles.size - 2].close
+        return Quote(i, candles, candles.last().close, prev, "USD", System.currentTimeMillis())
+    }
+
+    @Volatile private var coinsCache: Pair<Long, List<CoinInfo>>? = null
+
+    /** Piyasa değerine göre güncel ilk 100 coin (2 dakika önbellekli). */
+    suspend fun topCoins(maxAgeMs: Long = 120_000): List<CoinInfo> = withContext(Dispatchers.IO) {
+        coinsCache?.let { if (System.currentTimeMillis() - it.first < maxAgeMs) return@withContext it.second }
+        val list = runCatching { CryptoClient.topCoins(100) }.getOrNull()
+        if (!list.isNullOrEmpty()) coinsCache = System.currentTimeMillis() to list
+        list ?: coinsCache?.second ?: emptyList()
+    }
+
+    suspend fun fearGreed(): FearGreed? = withContext(Dispatchers.IO) { CryptoClient.fearGreed() }
 
     private suspend fun gramGold(i: Instrument): Quote? {
         val ons = quote(Universe.find("GC=F")) ?: return null
@@ -77,7 +100,11 @@ object Repository {
     /** withNews: hisse/enstrümana özel haber taraması (yavaştır; detay ekranı için). */
     suspend fun analyze(i: Instrument, withNews: Boolean, withFundamentals: Boolean = true, maxAgeMs: Long = 30_000): Analysis? {
         val q = quote(i, maxAgeMs) ?: return null
-        val bench = if (i.type == AssetType.STOCK) quote(Universe.find("XU100.IS"), 120_000) else null
+        val bench = when (i.type) {
+            AssetType.STOCK -> quote(Universe.find("XU100.IS"), 120_000)
+            AssetType.CRYPTO -> if (i.symbol == "BTC-USD") null else quote(Universe.crypto("BTC"), 120_000)
+            else -> null
+        }
         val f = if (withFundamentals) fundamentals(i) else null
         val n = if (withNews) news(i) else null
         return Analyzer.analyze(q, f, n, bench)

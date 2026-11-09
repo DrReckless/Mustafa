@@ -37,7 +37,18 @@ private val TR = Locale("tr", "TR")
 fun fmt(v: Double?, digits: Int = 2): String =
     if (v == null || v.isNaN()) "-" else String.format(TR, "%,.${digits}f", v)
 
-fun fmtPrice(v: Double): String = fmt(v, if (v >= 1000) 0 else if (v >= 10) 2 else 4)
+fun fmtPrice(v: Double): String = fmt(
+    v,
+    when {
+        v.isNaN() -> 2
+        v >= 1000 -> 0
+        v >= 10 -> 2
+        v >= 0.01 -> 4
+        // Çok düşük fiyatlı coinler (ör. SHIB, PEPE) için anlamlı basamak sayısı
+        v > 0 -> (-kotlin.math.log10(v)).toInt() + 4
+        else -> 2
+    }.coerceAtMost(12),
+)
 
 fun fmtPct(v: Double?): String = if (v == null || v.isNaN()) "-" else String.format(TR, "%+.2f%%", v)
 

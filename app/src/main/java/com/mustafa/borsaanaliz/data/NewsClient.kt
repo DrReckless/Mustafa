@@ -26,9 +26,15 @@ object NewsClient {
         return dedupe(all).take(80)
     }
 
+    private val cryptoQueries = listOf("bitcoin", "kripto para", "ethereum", "altcoin")
+
+    fun crypto(): List<NewsItem> =
+        dedupe(cryptoQueries.flatMap { runCatching { fetch(googleUrl(it)) }.getOrDefault(emptyList()) }).take(50)
+
     fun forInstrument(i: Instrument): List<NewsItem> {
         val q = when (i.type) {
             AssetType.STOCK -> "${i.symbol.removeSuffix(".IS")} hisse"
+            AssetType.CRYPTO -> "${i.name} kripto"
             else -> i.name.replace(Regex("\\(.*\\)"), "").replace("/", " ").trim()
         }
         return dedupe(runCatching { fetch(googleUrl(q)) }.getOrDefault(emptyList())).take(15)

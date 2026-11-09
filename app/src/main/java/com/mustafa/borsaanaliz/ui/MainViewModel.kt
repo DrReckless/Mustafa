@@ -6,7 +6,10 @@ import androidx.lifecycle.viewModelScope
 import com.mustafa.borsaanaliz.analysis.Analysis
 import com.mustafa.borsaanaliz.analysis.Analyzer
 import com.mustafa.borsaanaliz.analysis.MarketRisk
+import com.mustafa.borsaanaliz.data.CoinInfo
+import com.mustafa.borsaanaliz.data.FearGreed
 import com.mustafa.borsaanaliz.data.Instrument
+import com.mustafa.borsaanaliz.data.NewsClient
 import com.mustafa.borsaanaliz.data.NewsItem
 import com.mustafa.borsaanaliz.data.Position
 import com.mustafa.borsaanaliz.data.PriceAlarm
@@ -16,7 +19,10 @@ import com.mustafa.borsaanaliz.data.Repository
 import com.mustafa.borsaanaliz.data.Settings
 import com.mustafa.borsaanaliz.data.Universe
 import com.mustafa.borsaanaliz.worker.MonitorScheduler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +38,17 @@ data class UiState(
     val scan: List<Analysis> = emptyList(), // BIST 100 + izleme listesi taraması
     val scanTotal: Int = 0,
     val lastScan: Long = 0,
+    val crypto: List<Analysis> = emptyList(), // ilk 100 coin + kullanıcı coinleri
+    val coins: Map<String, CoinInfo> = emptyMap(),
+    val cryptoTotal: Int = 0,
+    val cryptoMissing: List<String> = emptyList(), // geçmiş fiyat verisi bulunamayan coinler
+    val cryptoRisk: MarketRisk? = null,
+    val fearGreed: FearGreed? = null,
+    val cryptoNews: List<NewsItem> = emptyList(),
+    val cryptoWatchlist: List<String> = emptyList(),
+    val lastCryptoScan: Long = 0,
+    val cryptoLoading: Boolean = false,
+    val usdTry: Double? = null,
     val marketRisk: MarketRisk? = null,
     val news: List<NewsItem> = emptyList(),
     val watchlist: List<String> = emptyList(),
@@ -53,7 +70,7 @@ data class DetailState(
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = Prefs(app)
     private val _state = MutableStateFlow(
-        UiState(watchlist = prefs.watchlist(), positions = prefs.positions(), alarms = prefs.alarms(), settings = prefs.settings())
+        UiState(watchlist = prefs.watchlist(), cryptoWatchlist = prefs.cryptoWatchlist(), positions = prefs.positions(), alarms = prefs.alarms(), settings = prefs.settings())
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -86,7 +103,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val maxAge = if (full) 0L else 30_000L
             val markets = Repository.analyzeAll(Universe.markets, withFundamentals = false, maxAgeMs = maxAge)
             val quotes = markets.associate { it.quote.instrument.symbol to it.quote }
-            _state.update { it.copy(markets = markets) }
+            _state.update { it.copy(markets = markets, usdTry = quotes["USDTRY=X"]?.price ?: it.usdTry) }
+            if (cryptoActive && (full || System.currentTimeMillis() - _state.value.lastCryptoScan > 5 * 60_000L)) {
+                launch { scanCrypto(maxAge) }
+            }
             val news = if (full || _state.value.news.isEmpty()) Repository.news(null) else _state.value.news
             val risk = Analyzer.marketRisk(quotes, news)
             _state.update { it.copy(news = news, marketRisk = risk) }
@@ -101,6 +121,76 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     error = if (markets.isEmpty() && it.scan.isEmpty()) "Veri alınamadı. İnternet bağlantınızı kontrol edin." else null,
                 )
             }
+        }
+    }
+
+    private var cryptoActive = prefs.cryptoUsed
+    private var cryptoJob: Job? = null
+
+    /** Kripto sekmesi açıldığında çağrılır; ilk açılışta taramayı başlatır. */
+    fun onCryptoTabOpened() {
+        if (!cryptoActive) { cryptoActive = true; prefs.cryptoUsed = true }
+        if (_state.value.crypto.isEmpty() && cryptoJob?.isActive != true) {
+            cryptoJob = viewModelScope.launch { scanCrypto(0) }
+        }
+    }
+
+    fun refreshCrypto() {
+        if (cryptoJob?.isActive == true) return
+        cryptoJob = viewModelScope.launch { scanCrypto(0) }
+    }
+
+    /**
+     * Her taramada CoinGecko'dan güncel ilk 100 coin alınır (liste sabit değildir), hepsi
+     * ve kullanıcının eklediği coinler günlük mumlarla yeniden teknik analizden geçirilir.
+     */
+    private suspend fun scanCrypto(maxAge: Long) = coroutineScope {
+        _state.update { it.copy(cryptoLoading = true) }
+        val fngJob = async { Repository.fearGreed() }
+        val newsJob = async(Dispatchers.IO) { runCatching { NewsClient.crypto() }.getOrDefault(emptyList()) }
+        val coins = Repository.topCoins(if (maxAge == 0L) 0 else 120_000)
+        val codes = (coins.map { it.code } + prefs.cryptoWatchlist()).distinct()
+        val list = Repository.analyzeAll(codes.map { Universe.crypto(it) }, withFundamentals = false, maxAgeMs = maxAge)
+            .sortedByDescending { it.score }
+        val fng = fngJob.await()
+        val news = newsJob.await().ifEmpty { _state.value.cryptoNews }
+        val btc = list.firstOrNull { it.quote.instrument.symbol == "BTC-USD" }?.quote
+        val risk = Analyzer.cryptoRisk(btc, fng, coins, news)
+        _state.update {
+            it.copy(
+                crypto = list.ifEmpty { it.crypto }, coins = coins.associateBy { c -> c.code }.ifEmpty { it.coins },
+                cryptoTotal = codes.size, cryptoRisk = risk,
+                cryptoMissing = if (list.isEmpty()) it.cryptoMissing
+                else codes - list.map { a -> a.quote.instrument.symbol.removeSuffix("-USD") }.toSet(), fearGreed = fng ?: it.fearGreed, cryptoNews = news,
+                lastCryptoScan = System.currentTimeMillis(), cryptoLoading = false,
+            )
+        }
+    }
+
+    fun addCrypto(code: String) {
+        val c = code.uppercase(java.util.Locale.ROOT).removeSuffix("-USD").trim()
+        if (c.isBlank()) return
+        val list = (prefs.cryptoWatchlist() + c).distinct()
+        prefs.setCryptoWatchlist(list)
+        _state.update { it.copy(cryptoWatchlist = list) }
+        viewModelScope.launch {
+            Repository.analyze(Universe.crypto(c), withNews = false)?.let { a ->
+                _state.update { st ->
+                    st.copy(crypto = (st.crypto.filter { it.quote.instrument.symbol != a.quote.instrument.symbol } + a).sortedByDescending { it.score })
+                }
+            }
+        }
+    }
+
+    fun removeCrypto(code: String) {
+        val list = prefs.cryptoWatchlist() - code
+        prefs.setCryptoWatchlist(list)
+        _state.update { st ->
+            st.copy(
+                cryptoWatchlist = list,
+                // İlk 100'deki bir coin listeden çıkmaz; yalnızca kullanıcının eklediği kaldırılır.
+                crypto = if (st.coins.containsKey(code)) st.crypto else st.crypto.filter { it.quote.instrument.symbol != "$code-USD" },
+            )
         }
     }
 

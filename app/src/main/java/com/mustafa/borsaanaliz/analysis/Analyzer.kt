@@ -230,7 +230,9 @@ object Analyzer {
         val c = q.candles.map { it.close }
         if (c.size < 30) return null
         val rets = Indicators.logReturns(c)
-        val vol = Indicators.stdev(rets.takeLast(120)) * sqrt(252.0) * 100
+        val crypto = q.instrument.type == AssetType.CRYPTO
+        // Kripto 7/24 işlem görür: yıllıklandırma 365 gün üzerinden.
+        val vol = Indicators.stdev(rets.takeLast(120)) * sqrt(if (crypto) 365.0 else 252.0) * 100
         val mdd = Indicators.maxDrawdown(c) * 100
         val sorted = rets.takeLast(250).sorted()
         val var95 = -sorted[(sorted.size * 0.05).toInt().coerceAtMost(sorted.size - 1)] * 100
@@ -247,7 +249,13 @@ object Analyzer {
                 if (varB > 0) beta = cov / varB
             }
         }
-        val level = when {
+        val level = if (crypto) when {
+            // Kripto için eşikler daha geniş; aksi halde her coin "Çok Yüksek" çıkar.
+            vol > 120 || var95 > 10 -> RiskLevel.VERY_HIGH
+            vol > 80 -> RiskLevel.HIGH
+            vol > 50 -> RiskLevel.MEDIUM
+            else -> RiskLevel.LOW
+        } else when {
             vol > 60 || var95 > 5 -> RiskLevel.VERY_HIGH
             vol > 40 -> RiskLevel.HIGH
             vol > 22 -> RiskLevel.MEDIUM
@@ -340,5 +348,51 @@ object Analyzer {
     }
 
     // İstanbul saatine göre gün (döviz barları önceki gün 23:00 UTC damgalı gelir)
+    /** Kripto piyasası risk puanı (0-100). */
+    fun cryptoRisk(btc: Quote?, fng: com.mustafa.borsaanaliz.data.FearGreed?, coins: List<com.mustafa.borsaanaliz.data.CoinInfo>, news: List<NewsItem>): MarketRisk {
+        var s = 0
+        val r = mutableListOf<String>()
+        fng?.let {
+            when {
+                it.value <= 20 -> { s += 18; r += "Korku ve Açgözlülük Endeksi ${it.value}: aşırı korku (panik satışları)" }
+                it.value <= 35 -> { s += 9; r += "Korku ve Açgözlülük Endeksi ${it.value}: korku" }
+                it.value >= 80 -> { s += 20; r += "Korku ve Açgözlülük Endeksi ${it.value}: aşırı açgözlülük (balon/düzeltme riski)" }
+                it.value >= 65 -> { s += 9; r += "Korku ve Açgözlülük Endeksi ${it.value}: açgözlülük" }
+            }
+            if (it.weekAgo != null && kotlin.math.abs(it.value - it.weekAgo) >= 20) {
+                s += 6; r += "Piyasa duygusu bir haftada sert değişti (${it.weekAgo} → ${it.value})"
+            }
+        }
+        btc?.let { q ->
+            val c = q.candles.map { it.close }
+            val s50 = Indicators.sma(c, 50).lastValid(); val s200 = Indicators.sma(c, 200).lastValid()
+            if (!s50.isNaN() && q.price < s50) { s += 12; r += "Bitcoin 50 günlük ortalamanın altında" }
+            if (!s200.isNaN() && q.price < s200) { s += 12; r += "Bitcoin 200 günlük ortalamanın altında (ayı piyasası sinyali)" }
+            val vol = Indicators.stdev(Indicators.logReturns(c).takeLast(30)) * sqrt(365.0) * 100
+            if (vol > 70) { s += 12; r += "Bitcoin oynaklığı yüksek (yıllık %%%.0f)".format(vol) }
+        }
+        val btcInfo = coins.firstOrNull { it.code == "BTC" }
+        btcInfo?.let { if (it.change24h < -5) { s += 14; r += "Bitcoin son 24 saatte sert düştü (%%%.1f)".format(it.change24h) } }
+        if (coins.size >= 20) {
+            val bigDrops = coins.count { it.change24h < -5 } * 100 / coins.size
+            val falling = coins.count { it.change24h < 0 } * 100 / coins.size
+            if (bigDrops >= 40) { s += 14; r += "İlk 100 coinin %$bigDrops'i 24 saatte %5'ten fazla düştü" }
+            else if (falling >= 75) { s += 8; r += "İlk 100 coinin %$falling'i günü ekside geçiriyor" }
+            else if (falling <= 25) { r += "Genel görünüm olumlu: coinlerin %${100 - falling}'i yükselişte" }
+        }
+        val newsSent = if (news.isEmpty()) 0 else news.take(30).map { it.sentiment }.average().toInt()
+        if (newsSent < -15) { s += 10; r += "Kripto haberlerinin genel tonu olumsuz" }
+        else if (newsSent > 15) { s -= 5; r += "Kripto haberlerinin genel tonu olumlu" }
+        s = s.coerceIn(0, 100)
+        if (r.isEmpty()) r += "Belirgin bir risk sinyali yok"
+        val level = when {
+            s >= 70 -> RiskLevel.VERY_HIGH
+            s >= 45 -> RiskLevel.HIGH
+            s >= 20 -> RiskLevel.MEDIUM
+            else -> RiskLevel.LOW
+        }
+        return MarketRisk(s, level, r, newsSent)
+    }
+
     fun dayKey(t: Long): Long = (t + 3 * 3_600_000L) / 86_400_000L
 }

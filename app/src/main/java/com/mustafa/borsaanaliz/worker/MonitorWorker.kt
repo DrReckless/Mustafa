@@ -12,9 +12,11 @@ import androidx.work.WorkerParameters
 import com.mustafa.borsaanaliz.analysis.Analyzer
 import com.mustafa.borsaanaliz.analysis.RiskLevel
 import com.mustafa.borsaanaliz.analysis.Signal
+import com.mustafa.borsaanaliz.data.AssetType
 import com.mustafa.borsaanaliz.data.Prefs
 import com.mustafa.borsaanaliz.data.Repository
 import com.mustafa.borsaanaliz.data.Universe
+import com.mustafa.borsaanaliz.ui.fmtPrice
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -68,7 +70,8 @@ class MonitorWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                     Notifier.send(ctx, nid++, Notifier.CH_URGENT, "⚠ ACİL: $code stop seviyesinin altında",
                         "Fiyat %.2f, stop %.2f (maliyete göre %%%.1f). Zararı sınırlamak için SATIŞ düşünün.".format(price, stop, pl), p.symbol)
                 }
-                if (a.quote.changePct <= -s.dailyDropAlertPct && prefs.markNotified("drop_${p.symbol}", day)) {
+                val dropLimit = if (inst.type == AssetType.CRYPTO) s.cryptoDropAlertPct else s.dailyDropAlertPct
+                if (a.quote.changePct <= -dropLimit && prefs.markNotified("drop_${p.symbol}", day)) {
                     Notifier.send(ctx, nid++, Notifier.CH_URGENT, "⚠ $code sert düşüşte: %%%.1f".format(a.quote.changePct),
                         "Bugün sert satış var. Fiyat %.2f. Teknik görünüm: ${a.signal.label}. Pozisyonunuzu gözden geçirin.".format(price), p.symbol)
                 }
@@ -106,6 +109,32 @@ class MonitorWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                     mr.reasons.take(3).joinToString("\n• ", prefix = "• "))
             }
 
+            // 3b) Kripto piyasa riski (kripto sekmesi kullanılıyorsa veya portföyde coin varsa)
+            val hasCrypto = prefs.cryptoUsed || positions.any { it.symbol.endsWith("-USD") }
+            var cryptoRiskText: String? = null
+            if (hasCrypto && (s.notifyMarketRisk || s.dailySummary || s.notifyBuySignals)) {
+                val coins = Repository.topCoins()
+                val btc = Repository.quote(Universe.crypto("BTC"), 60_000)
+                val cr = Analyzer.cryptoRisk(btc, Repository.fearGreed(), coins, emptyList())
+                cryptoRiskText = "Kripto riski: ${cr.level.label}" + (btc?.let { " · BTC $%,.0f (%+.1f%%)".format(it.price, it.changePct) } ?: "")
+                if (s.notifyMarketRisk && cr.level >= RiskLevel.HIGH && prefs.markNotified("crypto_risk", day)) {
+                    Notifier.send(ctx, nid++, Notifier.CH_URGENT, "⚠ Kripto riski ${cr.level.label} (${cr.score}/100)",
+                        cr.reasons.take(3).joinToString("\n• ", prefix = "• "))
+                }
+                // Kripto 7/24 açık: GÜÇLÜ AL taraması saatten bağımsız
+                if (s.notifyBuySignals) {
+                    val codes = (coins.map { it.code } + prefs.cryptoWatchlist()).distinct()
+                    Repository.analyzeAll(codes.map { Universe.crypto(it) }, withFundamentals = false, maxAgeMs = 60_000)
+                        .filter { it.signal == Signal.STRONG_BUY }
+                        .forEach { a ->
+                            if (prefs.markNotified("buy_${a.quote.instrument.symbol}", day)) {
+                                Notifier.send(ctx, nid++, Notifier.CH_SIGNAL, "${Universe.displayCode(a.quote.instrument)}: GÜÇLÜ AL sinyali",
+                                    "Fiyat $" + fmtPrice(a.quote.price) + ". Stop $" + fmtPrice(a.stopLoss ?: 0.0) + ", hedef $" + fmtPrice(a.target ?: 0.0), a.quote.instrument.symbol)
+                            }
+                        }
+                }
+            }
+
             // 4) Güçlü al sinyalleri (BIST 100 + izleme listesi taraması)
             if (s.notifyBuySignals && weekday && hour in 10..17) {
                 val list = Repository.analyzeAll((Universe.bist100 + prefs.watchlist()).distinct().map { Universe.stock(it) }, withFundamentals = false, maxAgeMs = 60_000)
@@ -125,6 +154,7 @@ class MonitorWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                     usd?.let { append("USD %.2f  ".format(it.price)) }
                     gold?.let { append("Gram altın %.0f\n".format(it.price)) }
                     append("Piyasa riski: ${mr.level.label}. ")
+                    cryptoRiskText?.let { append("$it. ") }
                     append(mr.reasons.first())
                 }
                 Notifier.send(ctx, 999, Notifier.CH_SUMMARY, "Günlük piyasa özeti", text)

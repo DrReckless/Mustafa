@@ -18,6 +18,21 @@ class Prefs(context: Context) {
         sp.edit().putString("watchlist", JSONArray(list.distinct()).toString()).apply()
     }
 
+    /** Kullanıcının ilk 100 dışında da takip etmek istediği coinler (ör. "PEPE"). */
+    fun cryptoWatchlist(): List<String> {
+        val arr = JSONArray(sp.getString("crypto_watchlist", "[]"))
+        return List(arr.length()) { arr.getString(it) }
+    }
+
+    fun setCryptoWatchlist(list: List<String>) {
+        sp.edit().putString("crypto_watchlist", JSONArray(list.distinct()).toString()).apply()
+    }
+
+    /** Kripto sekmesi en az bir kez açıldıysa arka planda kripto riski de izlenir. */
+    var cryptoUsed: Boolean
+        get() = sp.getBoolean("crypto_used", false)
+        set(v) = sp.edit().putBoolean("crypto_used", v).apply()
+
     fun positions(): List<Position> {
         val arr = JSONArray(sp.getString("positions", "[]"))
         return List(arr.length()) {
@@ -66,6 +81,7 @@ class Prefs(context: Context) {
             autoStopPct = sp.getFloat("s_stop", d.autoStopPct.toFloat()).toDouble(),
             autoTargetPct = sp.getFloat("s_target", d.autoTargetPct.toFloat()).toDouble(),
             dailyDropAlertPct = sp.getFloat("s_drop", d.dailyDropAlertPct.toFloat()).toDouble(),
+            cryptoDropAlertPct = sp.getFloat("s_cdrop", d.cryptoDropAlertPct.toFloat()).toDouble(),
             notifySellSignals = sp.getBoolean("s_sell", d.notifySellSignals),
             notifyBuySignals = sp.getBoolean("s_buy", d.notifyBuySignals),
             notifyMarketRisk = sp.getBoolean("s_risk", d.notifyMarketRisk),
@@ -80,6 +96,7 @@ class Prefs(context: Context) {
             .putFloat("s_stop", s.autoStopPct.toFloat())
             .putFloat("s_target", s.autoTargetPct.toFloat())
             .putFloat("s_drop", s.dailyDropAlertPct.toFloat())
+            .putFloat("s_cdrop", s.cryptoDropAlertPct.toFloat())
             .putBoolean("s_sell", s.notifySellSignals)
             .putBoolean("s_buy", s.notifyBuySignals)
             .putBoolean("s_risk", s.notifyMarketRisk)

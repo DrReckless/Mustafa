@@ -83,9 +83,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Tab(val title: String) { MARKET("Piyasa"), SIGNALS("Sinyaller"), PORTFOLIO("Portföy"), NEWS("Haberler"), SETTINGS("Ayarlar") }
+private enum class Tab(val title: String) { MARKET("Piyasa"), SIGNALS("Sinyaller"), CRYPTO("Kripto"), PORTFOLIO("Portföy"), NEWS("Haberler"), SETTINGS("Ayarlar") }
 
-private const val DISCLAIMER = "Bu uygulamadaki analizler otomatik hesaplanan göstergelere dayanır ve yatırım tavsiyesi değildir. " +
+internal const val DISCLAIMER = "Bu uygulamadaki analizler otomatik hesaplanan göstergelere dayanır ve yatırım tavsiyesi değildir. " +
     "Nihai karar ve sorumluluk kullanıcıya aittir."
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -123,19 +123,20 @@ fun AppRoot(vm: MainViewModel) {
             NavigationBar(containerColor = Palette.Anthracite) {
                 Tab.entries.forEachIndexed { i, t ->
                     NavigationBarItem(
-                        selected = tab == i, onClick = { tab = i },
+                        selected = tab == i, onClick = { tab = i; if (t == Tab.CRYPTO) vm.onCryptoTabOpened() },
                         icon = {
-                            Icon(
+                            if (t == Tab.CRYPTO) Text("₿", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            else Icon(
                                 when (t) {
                                     Tab.MARKET -> Icons.Filled.Home
                                     Tab.SIGNALS -> Icons.Filled.Star
                                     Tab.PORTFOLIO -> Icons.Filled.ShoppingCart
                                     Tab.NEWS -> Icons.AutoMirrored.Filled.List
-                                    Tab.SETTINGS -> Icons.Filled.Settings
+                                    else -> Icons.Filled.Settings
                                 }, t.title
                             )
                         },
-                        label = { Text(t.title, fontSize = 11.sp) },
+                        label = { Text(t.title, fontSize = 10.sp, maxLines = 1) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = Palette.Anthracite, indicatorColor = Palette.Beige,
                             selectedTextColor = Palette.Beige, unselectedIconColor = Palette.GrayLight, unselectedTextColor = Palette.Gray,
@@ -151,6 +152,7 @@ fun AppRoot(vm: MainViewModel) {
             when (Tab.entries[tab]) {
                 Tab.MARKET -> MarketScreen(st, vm)
                 Tab.SIGNALS -> SignalsScreen(st, vm)
+                Tab.CRYPTO -> CryptoScreen(st, vm)
                 Tab.PORTFOLIO -> PortfolioScreen(st, vm)
                 Tab.NEWS -> NewsScreen(st.news, st.marketRisk?.newsSentiment)
                 Tab.SETTINGS -> SettingsScreen(st, vm)
@@ -159,8 +161,8 @@ fun AppRoot(vm: MainViewModel) {
     }
 }
 
-private fun timeStr(t: Long) = SimpleDateFormat("HH:mm", Locale("tr")).format(Date(t))
-private fun dateTimeStr(t: Long) = if (t <= 0) "" else SimpleDateFormat("d MMM HH:mm", Locale("tr")).format(Date(t))
+internal fun timeStr(t: Long) = SimpleDateFormat("HH:mm", Locale("tr")).format(Date(t))
+internal fun dateTimeStr(t: Long) = if (t <= 0) "" else SimpleDateFormat("d MMM HH:mm", Locale("tr")).format(Date(t))
 
 // ---------------- Piyasa ----------------
 
@@ -206,7 +208,7 @@ private fun MarketScreen(st: UiState, vm: MainViewModel) {
 }
 
 @Composable
-private fun SectionHeader(t: String) {
+internal fun SectionHeader(t: String) {
     Text(t, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Palette.Gray,
         modifier = Modifier.padding(start = 18.dp, top = 12.dp, bottom = 4.dp))
 }
@@ -409,7 +411,7 @@ private fun AddPositionDialog(onDismiss: () -> Unit, onAdd: (Position) -> Unit) 
         title = { Text("Pozisyon ekle") },
         text = {
             Column {
-                OutlinedTextField(code, { code = it.uppercase() }, label = { Text("Kod (THYAO, DOLAR, ALTIN...)") }, singleLine = true)
+                OutlinedTextField(code, { code = it.uppercase() }, label = { Text("Kod (THYAO, DOLAR, ALTIN, BTC...)") }, singleLine = true)
                 OutlinedTextField(qty, { qty = it }, label = { Text("Adet") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                 OutlinedTextField(cost, { cost = it }, label = { Text("Alış fiyatı") }, singleLine = true,
@@ -453,7 +455,7 @@ private fun NewsScreen(news: List<NewsItem>, overall: Int?) {
 }
 
 @Composable
-private fun NewsRow(n: NewsItem, onClick: () -> Unit) {
+internal fun NewsRow(n: NewsItem, onClick: () -> Unit) {
     SectionCard(modifier = Modifier.clickable(onClick = onClick)) {
         Text(n.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         Spacer(Modifier.height(4.dp))
@@ -490,6 +492,7 @@ private fun SettingsScreen(st: UiState, vm: MainViewModel) {
             Stepper("Otomatik stop (maliyetin altında %)", s.autoStopPct, 1.0, 1.0..30.0) { vm.updateSettings(s.copy(autoStopPct = it)) }
             Stepper("Otomatik hedef (maliyetin üstünde %)", s.autoTargetPct, 1.0, 2.0..100.0) { vm.updateSettings(s.copy(autoTargetPct = it)) }
             Stepper("Günlük düşüş uyarısı (%)", s.dailyDropAlertPct, 0.5, 1.0..20.0) { vm.updateSettings(s.copy(dailyDropAlertPct = it)) }
+            Stepper("Kripto günlük düşüş uyarısı (%)", s.cryptoDropAlertPct, 1.0, 2.0..40.0) { vm.updateSettings(s.copy(cryptoDropAlertPct = it)) }
         }
         SectionCard("Test") {
             OutlinedButton(onClick = { vm.testCheck() }) { Text("Şimdi kontrol et (bildirimleri dene)") }
@@ -497,7 +500,7 @@ private fun SettingsScreen(st: UiState, vm: MainViewModel) {
                 fontSize = 11.sp, color = Palette.Gray)
         }
         SectionCard("Hakkında") {
-            Text("Veri kaynakları: Yahoo Finance (fiyat, temel veriler), Google Haberler / AA RSS (haberler). Veriler 15 dakikaya kadar gecikmeli olabilir.",
+            Text("Veri kaynakları: Yahoo Finance (fiyat, temel veriler), CoinGecko ve Binance (kripto), alternative.me (korku endeksi), Google Haberler / AA RSS (haberler). Veriler 15 dakikaya kadar gecikmeli olabilir.",
                 fontSize = 12.sp)
             Spacer(Modifier.height(6.dp))
             Text(DISCLAIMER, fontSize = 12.sp, color = Palette.Gray)
@@ -603,7 +606,7 @@ private fun DetailScreen(d: DetailState, onBack: () -> Unit, onAlarm: (PriceAlar
                         KeyValue("Yıllık oynaklık", "%" + fmt(r.volatility, 1))
                         KeyValue("Maks. düşüş (1 yıl)", "%" + fmt(r.maxDrawdown, 1))
                         KeyValue("Günlük VaR (%95)", "%" + fmt(r.var95, 2))
-                        r.beta?.let { KeyValue("Beta (BIST100'e göre)", fmt(it, 2)) }
+                        r.beta?.let { KeyValue(if (d.instrument.type == AssetType.CRYPTO) "Beta (Bitcoin'e göre)" else "Beta (BIST100'e göre)", fmt(it, 2)) }
                         Text("VaR: normal bir günde %95 olasılıkla bundan fazla kayıp beklenmez.", fontSize = 11.sp, color = Palette.Gray)
                     }
                 }
