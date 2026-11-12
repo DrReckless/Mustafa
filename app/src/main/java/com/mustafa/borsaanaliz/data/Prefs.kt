@@ -33,6 +33,23 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("crypto_used", false)
         set(v) = sp.edit().putBoolean("crypto_used", v).apply()
 
+    fun saveCoins(list: List<CoinInfo>) {
+        val arr = JSONArray()
+        list.forEach { c -> arr.put(JSONObject().put("c", c.code).put("n", c.name).put("r", c.rank)) }
+        sp.edit().putString("coins", arr.toString()).apply()
+    }
+
+    /** Son başarılı coin listesi (yalnızca kod/ad/sıra; fiyatlar tarama sırasında yeniden çekilir). */
+    fun savedCoins(): List<CoinInfo> {
+        val arr = JSONArray(sp.getString("coins", "[]"))
+        return List(arr.length()) {
+            val o = arr.getJSONObject(it)
+            val code = o.getString("c"); val name = o.getString("n")
+            CryptoNames.put(code, name)
+            CoinInfo(code, name, o.getInt("r"), 0.0, Double.NaN, Double.NaN, 0.0, 0.0)
+        }
+    }
+
     fun positions(): List<Position> {
         val arr = JSONArray(sp.getString("positions", "[]"))
         return List(arr.length()) {

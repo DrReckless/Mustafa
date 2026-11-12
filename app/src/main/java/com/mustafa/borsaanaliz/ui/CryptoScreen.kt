@@ -99,7 +99,17 @@ fun CryptoScreen(st: UiState, vm: MainViewModel) {
                     Text("Son tarama ${timeStr(st.lastCryptoScan)} · ${st.crypto.size}/${st.cryptoTotal} coin analiz edildi",
                         fontSize = 12.sp, color = Palette.Gray)
                     Text("AL: $buys  ·  TUT: ${st.crypto.size - buys - sells}  ·  SAT: $sells", fontSize = 12.sp, color = Palette.Gray)
-                    if (st.cryptoMissing.isNotEmpty()) {
+                    if (st.cryptoSource.isNotEmpty()) {
+                        Text("Coin listesi kaynağı: ${st.cryptoSource}", fontSize = 11.sp, color = Palette.Gray)
+                    }
+                    if (st.cryptoErrors.isNotEmpty()) {
+                        Text("Ulaşılamayan kaynaklar: " + st.cryptoErrors.joinToString(", "), fontSize = 11.sp, color = Palette.Warn)
+                    }
+                    if (st.crypto.isEmpty() && !st.cryptoLoading) {
+                        Text("Coin verisi alınamadı. İnternet bağlantınızı kontrol edip sağ üstteki yenile tuşuna basın.",
+                            fontSize = 12.sp, color = Palette.Down)
+                    }
+                                        if (st.cryptoMissing.isNotEmpty()) {
                         Text("Geçmiş fiyat verisi bulunamadığı için analiz edilemeyenler: " + st.cryptoMissing.joinToString(", "),
                             fontSize = 11.sp, color = Palette.Gray)
                     }
@@ -183,9 +193,9 @@ private fun CoinRow(a: Analysis, info: CoinInfo?, usdTry: Double?, onClick: () -
             Spacer(Modifier.width(6.dp))
             a.risk?.let { Pill("Risk: ${it.level.label}", riskColor(it.level)) }
             Spacer(Modifier.weight(1f))
-            val c24 = info?.change24h ?: a.quote.changePct
+            val c24 = info?.change24h?.takeIf { !it.isNaN() } ?: a.quote.changePct
             Text("24s ${fmtPct(c24)}", color = changeColor(c24), fontSize = 12.sp)
-            info?.let { Text("  7g ${fmtPct(it.change7d)}", color = changeColor(it.change7d), fontSize = 12.sp) }
+            info?.takeIf { !it.change7d.isNaN() }?.let { Text("  7g ${fmtPct(it.change7d)}", color = changeColor(it.change7d), fontSize = 12.sp) }
         }
         if (a.signal.isBuy && a.stopLoss != null) {
             Text(

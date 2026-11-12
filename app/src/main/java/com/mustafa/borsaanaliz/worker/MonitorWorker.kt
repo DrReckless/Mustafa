@@ -113,7 +113,7 @@ class MonitorWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
             val hasCrypto = prefs.cryptoUsed || positions.any { it.symbol.endsWith("-USD") }
             var cryptoRiskText: String? = null
             if (hasCrypto && (s.notifyMarketRisk || s.dailySummary || s.notifyBuySignals)) {
-                val coins = Repository.topCoins()
+                val coins = Repository.topCoins().coins
                 val btc = Repository.quote(Universe.crypto("BTC"), 60_000)
                 val cr = Analyzer.cryptoRisk(btc, Repository.fearGreed(), coins, emptyList())
                 cryptoRiskText = "Kripto riski: ${cr.level.label}" + (btc?.let { " · BTC $%,.0f (%+.1f%%)".format(it.price, it.changePct) } ?: "")

@@ -50,14 +50,28 @@ object Repository {
         return Quote(i, candles, candles.last().close, prev, "USD", System.currentTimeMillis())
     }
 
-    @Volatile private var coinsCache: Pair<Long, List<CoinInfo>>? = null
+    @Volatile private var coinsCache: Pair<Long, CoinList>? = null
 
-    /** Piyasa değerine göre güncel ilk 100 coin (2 dakika önbellekli). */
-    suspend fun topCoins(maxAgeMs: Long = 120_000): List<CoinInfo> = withContext(Dispatchers.IO) {
+    /** Son başarılı coin listesini telefonda saklamak için (BorsaApp ayarlar). */
+    @Volatile var prefs: Prefs? = null
+
+    /**
+     * Piyasa değerine göre güncel ilk 100 coin (2 dakika önbellekli). Tüm kaynaklar başarısız olursa
+     * son başarılı liste, o da yoksa yerleşik büyük coin listesi kullanılır; liste asla boş dönmez.
+     */
+    suspend fun topCoins(maxAgeMs: Long = 120_000): CoinList = withContext(Dispatchers.IO) {
         coinsCache?.let { if (System.currentTimeMillis() - it.first < maxAgeMs) return@withContext it.second }
-        val list = runCatching { CryptoClient.topCoins(100) }.getOrNull()
-        if (!list.isNullOrEmpty()) coinsCache = System.currentTimeMillis() to list
-        list ?: coinsCache?.second ?: emptyList()
+        val fresh = CryptoClient.topCoins(100)
+        if (fresh.coins.isNotEmpty()) {
+            coinsCache = System.currentTimeMillis() to fresh
+            prefs?.saveCoins(fresh.coins)
+            return@withContext fresh
+        }
+        coinsCache?.second?.let { return@withContext it.copy(source = it.source + " (önceki liste)", errors = fresh.errors) }
+        val saved = prefs?.savedCoins().orEmpty()
+        if (saved.isNotEmpty()) return@withContext CoinList(saved, "kayıtlı son liste", fresh.errors)
+        val builtin = CryptoNames.builtinCodes().mapIndexed { i, c -> CoinInfo(c, CryptoNames.get(c) ?: c, i + 1, 0.0, Double.NaN, Double.NaN, 0.0, 0.0) }
+        CoinList(builtin, "yerleşik liste", fresh.errors)
     }
 
     suspend fun fearGreed(): FearGreed? = withContext(Dispatchers.IO) { CryptoClient.fearGreed() }

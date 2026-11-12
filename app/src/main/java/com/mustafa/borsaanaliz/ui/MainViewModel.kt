@@ -41,6 +41,8 @@ data class UiState(
     val crypto: List<Analysis> = emptyList(), // ilk 100 coin + kullanıcı coinleri
     val coins: Map<String, CoinInfo> = emptyMap(),
     val cryptoTotal: Int = 0,
+    val cryptoSource: String = "", // coin listesinin geldiği kaynak
+    val cryptoErrors: List<String> = emptyList(), // başarısız kaynaklar ve nedenleri
     val cryptoMissing: List<String> = emptyList(), // geçmiş fiyat verisi bulunamayan coinler
     val cryptoRisk: MarketRisk? = null,
     val fearGreed: FearGreed? = null,
@@ -148,7 +150,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(cryptoLoading = true) }
         val fngJob = async { Repository.fearGreed() }
         val newsJob = async(Dispatchers.IO) { runCatching { NewsClient.crypto() }.getOrDefault(emptyList()) }
-        val coins = Repository.topCoins(if (maxAge == 0L) 0 else 120_000)
+        val coinList = Repository.topCoins(if (maxAge == 0L) 0 else 120_000)
+        val coins = coinList.coins
         val codes = (coins.map { it.code } + prefs.cryptoWatchlist()).distinct()
         val list = Repository.analyzeAll(codes.map { Universe.crypto(it) }, withFundamentals = false, maxAgeMs = maxAge)
             .sortedByDescending { it.score }
@@ -160,6 +163,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(
                 crypto = list.ifEmpty { it.crypto }, coins = coins.associateBy { c -> c.code }.ifEmpty { it.coins },
                 cryptoTotal = codes.size, cryptoRisk = risk,
+                cryptoSource = coinList.source, cryptoErrors = coinList.errors,
                 cryptoMissing = if (list.isEmpty()) it.cryptoMissing
                 else codes - list.map { a -> a.quote.instrument.symbol.removeSuffix("-USD") }.toSet(), fearGreed = fng ?: it.fearGreed, cryptoNews = news,
                 lastCryptoScan = System.currentTimeMillis(), cryptoLoading = false,

@@ -169,18 +169,24 @@ object Universe {
 
 /** Coin adları: CoinGecko listesinden doldurulur; uygulama ilk açılışta da tanısın diye çekirdek liste içerir. */
 object CryptoNames {
-    private val names = java.util.concurrent.ConcurrentHashMap(
-        mapOf(
-            "BTC" to "Bitcoin", "ETH" to "Ethereum", "BNB" to "BNB", "XRP" to "XRP", "SOL" to "Solana",
-            "TRX" to "TRON", "DOGE" to "Dogecoin", "ADA" to "Cardano", "LINK" to "Chainlink", "XLM" to "Stellar",
-            "BCH" to "Bitcoin Cash", "AVAX" to "Avalanche", "SUI" to "Sui", "LTC" to "Litecoin", "DOT" to "Polkadot",
-            "SHIB" to "Shiba Inu", "UNI" to "Uniswap", "NEAR" to "NEAR", "PEPE" to "Pepe", "AAVE" to "Aave",
-            "POL" to "Polygon", "ATOM" to "Cosmos", "ETC" to "Ethereum Classic", "HBAR" to "Hedera", "APT" to "Aptos",
-            "ARB" to "Arbitrum", "FIL" to "Filecoin", "XMR" to "Monero", "TON" to "Toncoin", "RENDER" to "Render",
-        )
+    // Sıra önemli: piyasa değerine göre yaklaşık sıralama (yerleşik yedek liste bu sırayı kullanır)
+    private val core = mapOf(
+        "BTC" to "Bitcoin", "ETH" to "Ethereum", "BNB" to "BNB", "XRP" to "XRP", "SOL" to "Solana",
+        "TRX" to "TRON", "DOGE" to "Dogecoin", "ADA" to "Cardano", "LINK" to "Chainlink", "XLM" to "Stellar",
+        "BCH" to "Bitcoin Cash", "AVAX" to "Avalanche", "SUI" to "Sui", "LTC" to "Litecoin", "DOT" to "Polkadot",
+        "SHIB" to "Shiba Inu", "UNI" to "Uniswap", "NEAR" to "NEAR", "PEPE" to "Pepe", "AAVE" to "Aave",
+        "POL" to "Polygon", "ATOM" to "Cosmos", "ETC" to "Ethereum Classic", "HBAR" to "Hedera", "APT" to "Aptos",
+        "ARB" to "Arbitrum", "FIL" to "Filecoin", "XMR" to "Monero", "TON" to "Toncoin", "RENDER" to "Render",
     )
+    private val names = java.util.concurrent.ConcurrentHashMap(core)
+
+    private val builtin = core.keys.toList()
+
+    /** Hiçbir liste kaynağına ulaşılamazsa kullanılacak büyük coinler. */
+    fun builtinCodes(): List<String> = builtin
 
     fun get(code: String): String? = names[code]
     fun isKnown(code: String) = names.containsKey(code)
+    fun isCore(code: String) = core.containsKey(code)
     fun put(code: String, name: String) { names[code] = name }
 }

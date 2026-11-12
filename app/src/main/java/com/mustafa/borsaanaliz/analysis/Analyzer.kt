@@ -371,11 +371,13 @@ object Analyzer {
             val vol = Indicators.stdev(Indicators.logReturns(c).takeLast(30)) * sqrt(365.0) * 100
             if (vol > 70) { s += 12; r += "Bitcoin oynaklığı yüksek (yıllık %%%.0f)".format(vol) }
         }
-        val btcInfo = coins.firstOrNull { it.code == "BTC" }
+        // Yedek listeden gelen coinlerde 24s değişim bilinmeyebilir (NaN); yalnızca bilinenler sayılır.
+        val live = coins.filter { !it.change24h.isNaN() }
+        val btcInfo = live.firstOrNull { it.code == "BTC" }
         btcInfo?.let { if (it.change24h < -5) { s += 14; r += "Bitcoin son 24 saatte sert düştü (%%%.1f)".format(it.change24h) } }
-        if (coins.size >= 20) {
-            val bigDrops = coins.count { it.change24h < -5 } * 100 / coins.size
-            val falling = coins.count { it.change24h < 0 } * 100 / coins.size
+        if (live.size >= 20) {
+            val bigDrops = live.count { it.change24h < -5 } * 100 / live.size
+            val falling = live.count { it.change24h < 0 } * 100 / live.size
             if (bigDrops >= 40) { s += 14; r += "İlk 100 coinin %$bigDrops'i 24 saatte %5'ten fazla düştü" }
             else if (falling >= 75) { s += 8; r += "İlk 100 coinin %$falling'i günü ekside geçiriyor" }
             else if (falling <= 25) { r += "Genel görünüm olumlu: coinlerin %${100 - falling}'i yükselişte" }
