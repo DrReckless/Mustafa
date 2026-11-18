@@ -161,6 +161,7 @@ class MonitorWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
             }
             prefs.lastCheck = System.currentTimeMillis()
         } catch (e: Exception) {
+            com.mustafa.borsaanaliz.data.CrashLog.note("arka plan kontrolü: $e")
             return Result.retry()
         }
         return Result.success()

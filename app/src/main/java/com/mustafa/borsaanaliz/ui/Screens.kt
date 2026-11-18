@@ -63,7 +63,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import com.mustafa.borsaanaliz.data.CrashLog
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -94,6 +98,31 @@ fun AppRoot(vm: MainViewModel) {
     val st by vm.state.collectAsState()
     val detail by vm.detail.collectAsState()
     var tab by remember { mutableIntStateOf(0) }
+    var crash by remember { mutableStateOf(CrashLog.lastCrash()) }
+
+    crash?.let { text ->
+        val clipboard = LocalClipboardManager.current
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Uygulama son açılışta bir hata nedeniyle kapandı") },
+            text = {
+                Column {
+                    Text("Aşağıdaki hata ayrıntısını kopyalayıp geliştiriciye iletirseniz sorun kesin olarak çözülebilir.",
+                        fontSize = 13.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Box(Modifier.height(260.dp).verticalScroll(rememberScrollState())) {
+                        SelectionContainer { Text(text, fontSize = 10.sp, color = Palette.Gray) }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { clipboard.setText(AnnotatedString(text)) }) { Text("Kopyala") }
+            },
+            dismissButton = {
+                TextButton(onClick = { CrashLog.clear(); crash = null }) { Text("Kapat") }
+            },
+        )
+    }
 
     detail?.let { d ->
         BackHandler { vm.closeDetail() }

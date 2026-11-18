@@ -121,7 +121,16 @@ object Repository {
         }
         val f = if (withFundamentals) fundamentals(i) else null
         val n = if (withNews) news(i) else null
-        return Analyzer.analyze(q, f, n, bench)
+        // Hesaplama arka plan iş parçacığında yapılır; tek bir enstrümanın beklenmedik verisi
+        // (bozuk fiyat serisi vb.) tüm uygulamayı kapatmamalı, o enstrüman atlanır.
+        return withContext(Dispatchers.Default) {
+            try {
+                Analyzer.analyze(q, f, n, bench)
+            } catch (e: Exception) {
+                CrashLog.note("analiz atlandı ${i.symbol}: $e")
+                null
+            }
+        }
     }
 
     suspend fun analyzeAll(list: List<Instrument>, withFundamentals: Boolean, maxAgeMs: Long = 30_000): List<Analysis> = coroutineScope {

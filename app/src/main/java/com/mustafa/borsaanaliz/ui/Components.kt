@@ -180,7 +180,8 @@ fun PriceChart(
 @Composable
 fun ScoreBar(score: Double, modifier: Modifier = Modifier) {
     // -100..100 skalası, ortası 0
-    val frac = ((score + 100) / 200).toFloat().coerceIn(0f, 1f)
+    // NaN güvenliği: fillMaxWidth(NaN) ölçüm sırasında uygulamayı çökertir
+    val frac = ((score + 100) / 200).toFloat().let { if (it.isNaN()) 0.5f else it.coerceIn(0f, 1f) }
     Column(modifier) {
         Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
             Box(Modifier.fillMaxWidth(frac).height(8.dp).clip(RoundedCornerShape(4.dp)).background(changeColor(score)))
@@ -197,7 +198,7 @@ fun ScoreBar(score: Double, modifier: Modifier = Modifier) {
 fun RiskMeter(score: Int, level: RiskLevel) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
-            Box(Modifier.fillMaxWidth(score / 100f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(riskColor(level)))
+            Box(Modifier.fillMaxWidth((score / 100f).coerceIn(0f, 1f)).height(10.dp).clip(RoundedCornerShape(5.dp)).background(riskColor(level)))
         }
         Spacer(Modifier.width(10.dp))
         Text("$score/100", fontWeight = FontWeight.Bold, color = riskColor(level))

@@ -19,6 +19,8 @@ import com.mustafa.borsaanaliz.data.Repository
 import com.mustafa.borsaanaliz.data.Settings
 import com.mustafa.borsaanaliz.data.Universe
 import com.mustafa.borsaanaliz.worker.MonitorScheduler
+import com.mustafa.borsaanaliz.data.CrashLog
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -81,6 +83,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private var autoJob: Job? = null
     private var detailJob: Job? = null
+    private var refreshJob: Job? = null
+    private var cryptoActive = prefs.cryptoUsed
+    private var cryptoJob: Job? = null
+
+    /**
+     * Arka plan işlerinde beklenmeyen bir hata uygulamayı kapatmasın: hata kaydedilir, ekranda
+     * mesaj gösterilir ve yükleniyor durumları kapatılır. (init'ten önce tanımlı olmalı.)
+     */
+    private val errors = CoroutineExceptionHandler { _, e ->
+        CrashLog.note("arka plan hatası: $e")
+        _state.update { it.copy(loading = false, cryptoLoading = false, error = "Bir hata oluştu, tekrar deneyin. ($e)".take(200)) }
+    }
 
     init {
         refresh(full = true)
@@ -89,7 +103,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Uygulama açıkken piyasa verilerini her dakika tazeler. */
     fun startAutoRefresh() {
         if (autoJob?.isActive == true) return
-        autoJob = viewModelScope.launch {
+        autoJob = viewModelScope.launch(errors) {
             while (isActive) {
                 delay(60_000)
                 refresh(full = false)
@@ -100,14 +114,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun stopAutoRefresh() { autoJob?.cancel() }
 
     fun refresh(full: Boolean = true) {
-        viewModelScope.launch {
+        // Üst üste basılan yenilemeler aynı anda yüzlerce istek açmasın
+        if (refreshJob?.isActive == true) return
+        refreshJob = viewModelScope.launch(errors) {
             _state.update { it.copy(loading = true, error = null) }
             val maxAge = if (full) 0L else 30_000L
             val markets = Repository.analyzeAll(Universe.markets, withFundamentals = false, maxAgeMs = maxAge)
             val quotes = markets.associate { it.quote.instrument.symbol to it.quote }
             _state.update { it.copy(markets = markets, usdTry = quotes["USDTRY=X"]?.price ?: it.usdTry) }
             if (cryptoActive && (full || System.currentTimeMillis() - _state.value.lastCryptoScan > 5 * 60_000L)) {
-                launch { scanCrypto(maxAge) }
+                if (cryptoJob?.isActive != true) cryptoJob = viewModelScope.launch(errors) { scanCrypto(maxAge) }
             }
             val news = if (full || _state.value.news.isEmpty()) Repository.news(null) else _state.value.news
             val risk = Analyzer.marketRisk(quotes, news)
@@ -126,20 +142,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private var cryptoActive = prefs.cryptoUsed
-    private var cryptoJob: Job? = null
-
     /** Kripto sekmesi açıldığında çağrılır; ilk açılışta taramayı başlatır. */
     fun onCryptoTabOpened() {
         if (!cryptoActive) { cryptoActive = true; prefs.cryptoUsed = true }
         if (_state.value.crypto.isEmpty() && cryptoJob?.isActive != true) {
-            cryptoJob = viewModelScope.launch { scanCrypto(0) }
+            cryptoJob = viewModelScope.launch(errors) { scanCrypto(0) }
         }
     }
 
     fun refreshCrypto() {
         if (cryptoJob?.isActive == true) return
-        cryptoJob = viewModelScope.launch { scanCrypto(0) }
+        cryptoJob = viewModelScope.launch(errors) { scanCrypto(0) }
     }
 
     /**
@@ -177,7 +190,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val list = (prefs.cryptoWatchlist() + c).distinct()
         prefs.setCryptoWatchlist(list)
         _state.update { it.copy(cryptoWatchlist = list) }
-        viewModelScope.launch {
+        viewModelScope.launch(errors) {
             Repository.analyze(Universe.crypto(c), withNews = false)?.let { a ->
                 _state.update { st ->
                     st.copy(crypto = (st.crypto.filter { it.quote.instrument.symbol != a.quote.instrument.symbol } + a).sortedByDescending { it.score })
@@ -226,9 +239,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun openDetail(i: Instrument) {
         detailJob?.cancel()
         _detail.value = DetailState(i)
-        detailJob = viewModelScope.launch {
-            val a = Repository.analyze(i, withNews = true, withFundamentals = true)
-            _detail.value = DetailState(i, loading = false, analysis = a, news = Repository.news(i))
+        detailJob = viewModelScope.launch(errors) {
+            try {
+                val a = Repository.analyze(i, withNews = true, withFundamentals = true)
+                _detail.value = DetailState(i, loading = false, analysis = a, news = Repository.news(i))
+            } finally {
+                // Hata olsa bile detay ekranı sonsuza dek "yükleniyor"da kalmasın
+                _detail.update { d -> if (d?.instrument == i && d.loading) d.copy(loading = false) else d }
+            }
         }
     }
 
@@ -240,7 +258,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val list = (prefs.watchlist() + c).distinct()
         prefs.setWatchlist(list)
         _state.update { it.copy(watchlist = list) }
-        viewModelScope.launch {
+        viewModelScope.launch(errors) {
             Repository.analyze(Universe.stock(c), withNews = false)?.let { a ->
                 _state.update { st ->
                     st.copy(
@@ -262,7 +280,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val list = prefs.positions().filter { it.symbol != p.symbol } + p
         prefs.setPositions(list)
         _state.update { it.copy(positions = list) }
-        viewModelScope.launch {
+        viewModelScope.launch(errors) {
             Repository.quote(Universe.find(p.symbol))?.let { q -> _state.update { it.copy(positionQuotes = it.positionQuotes + (p.symbol to q)) } }
         }
     }
